@@ -83,7 +83,10 @@ Owns the machine graph and advances the system.
 ### `GameBoy::Timer`
 
 - DIV / TIMA / TMA / TAC
-- simple dot-driven timer model
+- dot-driven system counter model
+- selected DIV bit falling edge increments TIMA
+- DIV/TAC writes may tick TIMA early
+- TIMA reload / interrupt occur one M-cycle after overflow
 
 ### `GameBoy::Joypad`
 

@@ -60,6 +60,11 @@ def build_test_mbc1_rom(cartridge_type: 0x03, rom_size_code: 0x03, ram_size_code
   )
 end
 
+def build_test_timer
+  interrupts = GameBoy::Interrupts.new
+  [GameBoy::Timer.new(interrupts), interrupts]
+end
+
 assert('GameBoy::Cartridge parses Tobu-style header fields') do
   rom = Array.new(0x8000, 0)
   title = 'TOBU'
@@ -1036,4 +1041,90 @@ assert('GameBoy::CPU CALL C,a16 skips call when not taken') do
   assert_equal 12, cycles
   assert_equal 0x0103, core.cpu.pc
   assert_equal 0xFFFE, core.cpu.sp
+end
+
+assert('GameBoy::Timer DIV reset can tick TIMA on falling edge') do
+  timer, interrupts = build_test_timer
+  timer.write_io(0xFF07, 0x05)
+  timer.tick(8)
+
+  assert_equal 0x00, timer.read_io(0xFF05)
+
+  timer.write_io(0xFF04, 0x00)
+
+  assert_equal 0x01, timer.read_io(0xFF05)
+  assert_equal 0xE0, interrupts.read_if
+end
+
+assert('GameBoy::Timer TAC write can tick TIMA when selected bit falls') do
+  timer, _interrupts = build_test_timer
+  timer.write_io(0xFF07, 0x05)
+  timer.tick(8)
+
+  timer.write_io(0xFF07, 0x06)
+
+  assert_equal 0x01, timer.read_io(0xFF05)
+end
+
+assert('GameBoy::Timer overflow reloads TMA one M-cycle later') do
+  timer, interrupts = build_test_timer
+  timer.write_io(0xFF06, 0xAB)
+  timer.write_io(0xFF05, 0xFF)
+  timer.write_io(0xFF07, 0x05)
+
+  timer.tick(16)
+
+  assert_equal 0x00, timer.read_io(0xFF05)
+  assert_equal 0xE0, interrupts.read_if
+
+  timer.tick(3)
+  assert_equal 0x00, timer.read_io(0xFF05)
+  assert_equal 0xE0, interrupts.read_if
+
+  timer.tick(1)
+  assert_equal 0xAB, timer.read_io(0xFF05)
+  assert_equal 0xE4, interrupts.read_if
+end
+
+assert('GameBoy::Timer TIMA write during pending reload cancels reload and interrupt') do
+  timer, interrupts = build_test_timer
+  timer.write_io(0xFF06, 0xAB)
+  timer.write_io(0xFF05, 0xFF)
+  timer.write_io(0xFF07, 0x05)
+
+  timer.tick(16)
+  timer.write_io(0xFF05, 0x66)
+  timer.tick(4)
+
+  assert_equal 0x66, timer.read_io(0xFF05)
+  assert_equal 0xE0, interrupts.read_if
+end
+
+assert('GameBoy::Timer TIMA write during reload cycle is ignored') do
+  timer, _interrupts = build_test_timer
+  timer.write_io(0xFF06, 0xAB)
+  timer.write_io(0xFF05, 0xFF)
+  timer.write_io(0xFF07, 0x05)
+
+  timer.tick(20)
+  timer.write_io(0xFF05, 0x66)
+
+  assert_equal 0xAB, timer.read_io(0xFF05)
+
+  timer.tick(4)
+  timer.write_io(0xFF05, 0x66)
+  assert_equal 0x66, timer.read_io(0xFF05)
+end
+
+assert('GameBoy::Timer TMA write during reload cycle also updates TIMA') do
+  timer, _interrupts = build_test_timer
+  timer.write_io(0xFF06, 0xAB)
+  timer.write_io(0xFF05, 0xFF)
+  timer.write_io(0xFF07, 0x05)
+
+  timer.tick(20)
+  timer.write_io(0xFF06, 0x77)
+
+  assert_equal 0x77, timer.read_io(0xFF06)
+  assert_equal 0x77, timer.read_io(0xFF05)
 end
