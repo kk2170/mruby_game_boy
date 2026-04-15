@@ -582,7 +582,7 @@ assert('GameBoy::CPU JR uses post-immediate PC as base') do
   assert_equal 0x0104, core.cpu.pc
 end
 
-assert('GameBoy::Bus routes FF46 writes to DMA') do
+assert('GameBoy::Bus routes FF46 writes to DMA over time') do
   rom = Array.new(0x8000, 0)
   rom[0x0147] = 0x00
   core = GameBoy::Core.new(rom)
@@ -594,7 +594,33 @@ assert('GameBoy::Bus routes FF46 writes to DMA') do
   core.bus.write8(0xFF46, 0xC0)
 
   assert_equal 0x00, core.ppu.read_oam(0xFE00)
+
+  core.dma.tick(4)
+  assert_equal 0x00, core.ppu.read_oam(0xFE00)
+
+  core.dma.tick(4)
+  assert_equal 0x01, core.ppu.read_oam(0xFE01)
+
+  core.dma.tick(632)
   assert_equal 0x9F, core.ppu.read_oam(0xFE9F)
+  assert_equal false, core.dma.active?
+end
+
+assert('GameBoy::DMA can read source bytes from FF00 page registers') do
+  rom = Array.new(0x8000, 0)
+  rom[0x0147] = 0x00
+  core = GameBoy::Core.new(rom)
+
+  core.bus.write8(0xFF07, 0x05)
+  core.bus.write8(0xFF0F, 0x1F)
+  core.bus.write8(0xFFFF, 0x12)
+  core.bus.write8(0xFF46, 0xFF)
+  core.dma.tick(640)
+
+  assert_equal core.bus.read8(0xFF00), core.ppu.read_oam(0xFE00)
+  assert_equal core.bus.read8(0xFF07), core.ppu.read_oam(0xFE07)
+  assert_equal core.bus.read8(0xFF0F), core.ppu.read_oam(0xFE0F)
+  assert_equal 0xFF, core.ppu.read_oam(0xFE7F)
 end
 
 assert('GameBoy::FrameExporter outputs PPM header') do

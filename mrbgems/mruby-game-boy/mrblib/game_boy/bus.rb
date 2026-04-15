@@ -87,6 +87,43 @@ module GameBoy
       end
     end
 
+    def read_dma_source8(addr)
+      addr &= 0xFFFF
+
+      case addr
+      when 0x0000..0x7FFF, 0xA000..0xBFFF
+        @cartridge.read8(addr)
+      when 0x8000..0x9FFF
+        @ppu.read_vram(addr)
+      when 0xC000..0xDFFF
+        @wram[addr - 0xC000]
+      when 0xE000..0xFDFF
+        @wram[addr - 0xE000]
+      when 0xFE00..0xFE9F
+        @ppu.read_oam(addr)
+      when 0xFEA0..0xFEFF
+        0xFF
+      when 0xFF00
+        @joypad.read_p1
+      when 0xFF04..0xFF07
+        @timer.read_io(addr)
+      when 0xFF0F
+        @interrupts.read_if
+      when 0xFF46
+        @dma.read_io(addr)
+      when 0xFF40..0xFF4B
+        @ppu.read_io(addr)
+      when 0xFF80..0xFFFE
+        @hram[addr - 0xFF80]
+      when 0xFFFF
+        @interrupts.read_ie
+      when 0xFF00..0xFF7F
+        @io_stub[addr - 0xFF00] || 0xFF
+      else
+        0xFF
+      end
+    end
+
     def write8(addr, value)
       addr &= 0xFFFF
       value &= 0xFF

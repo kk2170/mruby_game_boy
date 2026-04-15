@@ -96,7 +96,7 @@ Owns the machine graph and advances the system.
 ### `GameBoy::DMA`
 
 - FF46 OAM DMA trigger
-- currently copies immediately and keeps a transfer-active timer
+- transfers OAM progressively over 640 dots
 
 ## Timing unit
 
