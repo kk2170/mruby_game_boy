@@ -1,0 +1,12 @@
+.idea/
+tmp/
+build/
+build_config.rb.lock
+*.ppm
+
+tobutobugirl.zip
+tobutobugirl.zip:Zone.Identifier
+
+test_roms/*
+!test_roms/.gitkeep
+!test_roms/README.md

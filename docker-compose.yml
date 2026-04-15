@@ -1,0 +1,38 @@
+services:
+  mruby-dev:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    working_dir: /workspace
+    environment:
+      MRUBY_ROOT: /opt/mruby
+      MRUBY_REF: ${MRUBY_REF:-master}
+      GAME_BOY_ENABLE_SDL2: "1"
+      MRUBY_CONFIG: /workspace/build_config.rb
+    volumes:
+      - .:/workspace
+      - mruby-root:/opt/mruby
+    stdin_open: true
+    tty: true
+
+  mruby-x11:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    working_dir: /workspace
+    environment:
+      MRUBY_ROOT: /opt/mruby
+      MRUBY_REF: ${MRUBY_REF:-master}
+      GAME_BOY_ENABLE_SDL2: "1"
+      MRUBY_CONFIG: /workspace/build_config.rb
+      DISPLAY: ${DISPLAY:-:0}
+      XAUTHORITY: ${XAUTHORITY:-}
+    volumes:
+      - .:/workspace
+      - mruby-root:/opt/mruby
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    stdin_open: true
+    tty: true
+
+volumes:
+  mruby-root:
