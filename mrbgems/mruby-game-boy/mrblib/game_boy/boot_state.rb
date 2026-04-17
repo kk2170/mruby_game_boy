@@ -27,6 +27,11 @@ module GameBoy
       0xFF26 => 0xF1
     }
 
+    APU_DEFAULT_RANGE = [
+      (0xFF10..0xFF26),
+      (0xFF30..0xFF3F)
+    ].freeze
+
     def self.apply!(core)
       core.cpu.load_boot_state(
         af: 0x01B0,
@@ -42,6 +47,7 @@ module GameBoy
       core.timer.load_boot_state(0xAB, 0x00, 0x00, 0xF8)
       core.joypad.load_boot_state(0xCF)
       core.dma.load_boot_state(0xFF, 0)
+      core.apu.load_boot_state(apu_defaults)
       core.ppu.load_boot_state(
         lcdc: 0x91,
         stat_select: 0x00,
@@ -57,7 +63,42 @@ module GameBoy
         wy: 0x00,
         wx: 0x00
       )
-      core.bus.load_boot_stub_io(IO_DEFAULTS)
+      core.bus.load_boot_stub_io(non_apu_defaults)
+    end
+
+    def self.apu_defaults
+      filter_defaults(true)
+    end
+
+    def self.non_apu_defaults
+      filter_defaults(false)
+    end
+
+    def self.filter_defaults(apu)
+      filtered = {}
+      keys = IO_DEFAULTS.keys
+      index = 0
+
+      while index < keys.length
+        addr = keys[index]
+        in_apu_range = apu_address?(addr)
+        filtered[addr] = IO_DEFAULTS[addr] if in_apu_range == apu
+        index += 1
+      end
+
+      filtered
+    end
+
+    def self.apu_address?(addr)
+      index = 0
+
+      while index < APU_DEFAULT_RANGE.length
+        return true if APU_DEFAULT_RANGE[index].include?(addr)
+
+        index += 1
+      end
+
+      false
     end
   end
 end

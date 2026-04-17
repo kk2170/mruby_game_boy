@@ -64,6 +64,50 @@ assert('GameBoy::Core boots into DMG post-boot register state') do
   assert_equal 0x0100, core.cpu.pc
 end
 
+assert('GameBoy::Bus routes APU register reads from boot state') do
+  rom = Array.new(0x8000, 0)
+  rom[0x0147] = 0x00
+  core = GameBoy::Core.new(rom)
+
+  assert_equal 0x80, core.bus.read8(0xFF10)
+  assert_equal 0xF3, core.bus.read8(0xFF25)
+  assert_equal 0xF1, core.bus.read8(0xFF26)
+  assert_equal 0xFF, core.bus.read8(0xFF27)
+end
+
+assert('GameBoy::APU stores wave RAM through bus') do
+  rom = Array.new(0x8000, 0)
+  rom[0x0147] = 0x00
+  core = GameBoy::Core.new(rom)
+
+  core.bus.write8(0xFF30, 0x12)
+  core.bus.write8(0xFF3F, 0x34)
+
+  assert_equal 0x12, core.bus.read8(0xFF30)
+  assert_equal 0x34, core.bus.read8(0xFF3F)
+end
+
+assert('GameBoy::APU updates NR52 status on trigger and power off') do
+  rom = Array.new(0x8000, 0)
+  rom[0x0147] = 0x00
+  core = GameBoy::Core.new(rom)
+
+  core.bus.write8(0xFF26, 0x80)
+  core.bus.write8(0xFF14, 0x80)
+  core.bus.write8(0xFF19, 0x80)
+
+  assert_equal 0xF3, core.bus.read8(0xFF26)
+
+  core.bus.write8(0xFF12, 0x77)
+  core.bus.write8(0xFF26, 0x00)
+
+  assert_equal 0x70, core.bus.read8(0xFF26)
+  assert_equal 0x00, core.bus.read8(0xFF12)
+
+  core.bus.write8(0xFF12, 0x99)
+  assert_equal 0x00, core.bus.read8(0xFF12)
+end
+
 assert('GameBoy::Cartridge builds basic MBC1 cartridges') do
   rom = Array.new(256 * 1024, 0)
   rom[0x0147] = 0x03
@@ -271,4 +315,233 @@ assert('GameBoy::CPU implements HALT bug when IME is off and interrupt is pendin
 
   assert_equal 0x0600, core.cpu.bc & 0xFF00
   assert_equal 0x0102, core.cpu.pc
+end
+
+assert('GameBoy::CPU STOP consumes trailing byte') do
+  rom = Array.new(0x8000, 0)
+  rom[0x0147] = 0x00
+  rom[0x0100] = 0x10
+  rom[0x0101] = 0x99
+
+  core = GameBoy::Core.new(rom)
+  cycles = core.step
+
+  assert_equal 4, cycles
+  assert_equal 0x0102, core.cpu.pc
+end
+
+assert('GameBoy::CPU STOP returns 0 dots while stopped') do
+  rom = Array.new(0x8000, 0)
+  rom[0x0147] = 0x00
+  rom[0x0100] = 0x10
+  rom[0x0101] = 0x00
+
+  core = GameBoy::Core.new(rom)
+  core.step
+  cycles = core.step
+
+  assert_equal 0, cycles
+  assert_equal 0x0102, core.cpu.pc
+end
+
+assert('GameBoy::CPU STOP wakes on selected joypad line falling edge') do
+  rom = Array.new(0x8000, 0)
+  rom[0x0147] = 0x00
+  rom[0x0100] = 0x10
+  rom[0x0101] = 0x00
+  rom[0x0102] = 0x04
+
+  core = GameBoy::Core.new(rom)
+  core.step
+
+  assert_equal 0, core.step
+
+  core.press_button(:a)
+  cycles = core.step
+
+  assert_equal 4, cycles
+  assert_equal 0x0113, core.cpu.bc
+  assert_equal 0x0103, core.cpu.pc
+end
+
+assert('GameBoy::CPU STOP does not remain stopped when wake condition is already met') do
+  rom = Array.new(0x8000, 0)
+  rom[0x0147] = 0x00
+  rom[0x0100] = 0x10
+  rom[0x0101] = 0x00
+  rom[0x0102] = 0x06
+  rom[0x0103] = 0x12
+
+  core = GameBoy::Core.new(rom)
+  core.bus.write8(0xFF00, 0x10)
+  core.press_button(:a)
+
+  assert_equal 4, core.step
+
+  cycles = core.step
+
+  assert_equal 8, cycles
+  assert_equal 0x12, core.cpu.b
+  assert_equal 0x0104, core.cpu.pc
+end
+
+assert('GameBoy::Joypad requests interrupt on selected line falling edge from P1 write') do
+  core = GameBoy::Core.new(Array.new(0x8000, 0))
+  core.bus.write8(0xFF00, 0x30)
+  core.press_button(:a)
+  core.interrupts.write_if(0xE0)
+
+  core.bus.write8(0xFF00, 0x10)
+
+  assert_equal 0x10, core.interrupts.read_if & 0x10
+end
+
+assert('GameBoy::Core#run_frame stops when CPU is stopped') do
+  rom = Array.new(0x8000, 0)
+  rom[0x0147] = 0x00
+  rom[0x0100] = 0x10
+  rom[0x0101] = 0x00
+
+  core = GameBoy::Core.new(rom)
+  result = core.run_frame
+
+  assert_equal 4, result[:dots]
+  assert_equal 2, result[:steps]
+  assert_false result[:frame_ready]
+end
+
+assert('GameBoy::CPU CALL NZ,a16 pushes return address when taken') do
+  rom = Array.new(0x8000, 0)
+  rom[0x0147] = 0x00
+  rom[0x0100] = 0xC4
+  rom[0x0101] = 0x34
+  rom[0x0102] = 0x12
+
+  core = GameBoy::Core.new(rom)
+  core.cpu.af = 0x0000
+  cycles = core.step
+
+  assert_equal 24, cycles
+  assert_equal 0x1234, core.cpu.pc
+  assert_equal 0xFFFC, core.cpu.sp
+  assert_equal 0x03, core.bus.read8(0xFFFC)
+  assert_equal 0x01, core.bus.read8(0xFFFD)
+end
+
+assert('GameBoy::CPU CALL NZ,a16 skips call when not taken') do
+  rom = Array.new(0x8000, 0)
+  rom[0x0147] = 0x00
+  rom[0x0100] = 0xC4
+  rom[0x0101] = 0x34
+  rom[0x0102] = 0x12
+
+  core = GameBoy::Core.new(rom)
+  core.cpu.af = 0x0080
+  cycles = core.step
+
+  assert_equal 12, cycles
+  assert_equal 0x0103, core.cpu.pc
+  assert_equal 0xFFFE, core.cpu.sp
+end
+
+assert('GameBoy::CPU CALL Z,a16 pushes return address when taken') do
+  rom = Array.new(0x8000, 0)
+  rom[0x0147] = 0x00
+  rom[0x0100] = 0xCC
+  rom[0x0101] = 0x34
+  rom[0x0102] = 0x12
+
+  core = GameBoy::Core.new(rom)
+  core.cpu.af = 0x0080
+  cycles = core.step
+
+  assert_equal 24, cycles
+  assert_equal 0x1234, core.cpu.pc
+  assert_equal 0xFFFC, core.cpu.sp
+  assert_equal 0x03, core.bus.read8(0xFFFC)
+  assert_equal 0x01, core.bus.read8(0xFFFD)
+end
+
+assert('GameBoy::CPU CALL Z,a16 skips call when not taken') do
+  rom = Array.new(0x8000, 0)
+  rom[0x0147] = 0x00
+  rom[0x0100] = 0xCC
+  rom[0x0101] = 0x34
+  rom[0x0102] = 0x12
+
+  core = GameBoy::Core.new(rom)
+  core.cpu.af = 0x0000
+  cycles = core.step
+
+  assert_equal 12, cycles
+  assert_equal 0x0103, core.cpu.pc
+  assert_equal 0xFFFE, core.cpu.sp
+end
+
+assert('GameBoy::CPU CALL NC,a16 pushes return address when taken') do
+  rom = Array.new(0x8000, 0)
+  rom[0x0147] = 0x00
+  rom[0x0100] = 0xD4
+  rom[0x0101] = 0x34
+  rom[0x0102] = 0x12
+
+  core = GameBoy::Core.new(rom)
+  core.cpu.af = 0x0000
+  cycles = core.step
+
+  assert_equal 24, cycles
+  assert_equal 0x1234, core.cpu.pc
+  assert_equal 0xFFFC, core.cpu.sp
+  assert_equal 0x03, core.bus.read8(0xFFFC)
+  assert_equal 0x01, core.bus.read8(0xFFFD)
+end
+
+assert('GameBoy::CPU CALL NC,a16 skips call when not taken') do
+  rom = Array.new(0x8000, 0)
+  rom[0x0147] = 0x00
+  rom[0x0100] = 0xD4
+  rom[0x0101] = 0x34
+  rom[0x0102] = 0x12
+
+  core = GameBoy::Core.new(rom)
+  core.cpu.af = 0x0010
+  cycles = core.step
+
+  assert_equal 12, cycles
+  assert_equal 0x0103, core.cpu.pc
+  assert_equal 0xFFFE, core.cpu.sp
+end
+
+assert('GameBoy::CPU CALL C,a16 pushes return address when taken') do
+  rom = Array.new(0x8000, 0)
+  rom[0x0147] = 0x00
+  rom[0x0100] = 0xDC
+  rom[0x0101] = 0x34
+  rom[0x0102] = 0x12
+
+  core = GameBoy::Core.new(rom)
+  core.cpu.af = 0x0010
+  cycles = core.step
+
+  assert_equal 24, cycles
+  assert_equal 0x1234, core.cpu.pc
+  assert_equal 0xFFFC, core.cpu.sp
+  assert_equal 0x03, core.bus.read8(0xFFFC)
+  assert_equal 0x01, core.bus.read8(0xFFFD)
+end
+
+assert('GameBoy::CPU CALL C,a16 skips call when not taken') do
+  rom = Array.new(0x8000, 0)
+  rom[0x0147] = 0x00
+  rom[0x0100] = 0xDC
+  rom[0x0101] = 0x34
+  rom[0x0102] = 0x12
+
+  core = GameBoy::Core.new(rom)
+  core.cpu.af = 0x0000
+  cycles = core.step
+
+  assert_equal 12, cycles
+  assert_equal 0x0103, core.cpu.pc
+  assert_equal 0xFFFE, core.cpu.sp
 end

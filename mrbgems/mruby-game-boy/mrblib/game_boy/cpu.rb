@@ -21,6 +21,7 @@ module GameBoy
       @pc = 0
       @ime = false
       @halted = false
+      @stopped = false
       @halt_bug = false
       # EI は「次の命令の後」で IME を立てるため遅延を持つ。
       @ime_enable_delay = 0
@@ -35,6 +36,7 @@ module GameBoy
       @pc = values[:pc] & 0xFFFF
       @ime = values[:ime] ? true : false
       @halted = false
+      @stopped = false
       @halt_bug = false
       @ime_enable_delay = 0
     end
@@ -45,6 +47,8 @@ module GameBoy
     end
 
     def step
+      return 0 if @stopped
+
       # HALT 中は割り込み要求が来るまで 1 命令分の空き時間だけ進める。
       if @halted
         return 4 unless @interrupts.serviceable?
@@ -73,6 +77,10 @@ module GameBoy
 
     def af
       (@a << 8) | (@f & 0xF0)
+    end
+
+    def wake_stop
+      @stopped = false
     end
 
     def af=(value)
@@ -125,6 +133,7 @@ module GameBoy
       when 0x0A then op_ld_a_indirect_rr(:bc)
       when 0x0B then op_dec_rr(:bc)
       when 0x0F then op_rrca
+      when 0x10 then op_stop
       when 0x11 then op_ld_rr_d16(:de)
       when 0x12 then op_ld_indirect_rr_a(:de)
       when 0x13 then op_inc_rr(:de)
@@ -160,11 +169,13 @@ module GameBoy
       when 0xC1 then op_pop_rr(:bc)
       when 0xC2 then op_jp_cond_a16(:nz)
       when 0xC3 then op_jp_a16
+      when 0xC4 then op_call_cond_a16(:nz)
       when 0xC5 then op_push_rr(bc)
       when 0xC6 then op_add_a_n(fetch8)
       when 0xC8 then op_ret_cond(:z)
       when 0xC9 then op_ret
       when 0xCA then op_jp_cond_a16(:z)
+      when 0xCC then op_call_cond_a16(:z)
       when 0xCD then op_call_a16
       when 0xCE then op_adc_a_n(fetch8)
       when 0xCB then execute_cb(fetch8)
@@ -172,14 +183,16 @@ module GameBoy
       when 0xD0 then op_ret_cond(:nc)
       when 0xD1 then op_pop_rr(:de)
       when 0xD2 then op_jp_cond_a16(:nc)
+      when 0xD4 then op_call_cond_a16(:nc)
       when 0xD5 then op_push_rr(de)
       when 0xD6 then op_sub_a_n(fetch8)
       when 0xD8 then op_ret_cond(:c)
       when 0xD9 then op_reti
       when 0xDA then op_jp_cond_a16(:c)
-      when 0xDE then op_sbc_a_n(fetch8)
       when 0xD7 then op_rst(0x10)
       when 0xDF then op_rst(0x18)
+      when 0xDC then op_call_cond_a16(:c)
+      when 0xDE then op_sbc_a_n(fetch8)
       when 0xE0 then op_ldh_a8_a
       when 0xE1 then op_pop_rr(:hl)
       when 0xE2 then op_ld_ff00_c_a
@@ -548,6 +561,12 @@ module GameBoy
       4
     end
 
+    def op_stop
+      fetch8
+      @stopped = true
+      4
+    end
+
     def op_add_a_r8(code)
       op_add_a_n(read_r8(code), code == 6 ? 8 : 4)
     end
@@ -688,6 +707,18 @@ module GameBoy
       push16(@pc)
       @pc = address
       24
+    end
+
+    def op_call_cond_a16(condition)
+      address = fetch16
+
+      if condition_true?(condition)
+        push16(@pc)
+        @pc = address
+        24
+      else
+        12
+      end
     end
 
     def op_reti

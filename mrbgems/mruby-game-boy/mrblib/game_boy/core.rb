@@ -1,6 +1,6 @@
 module GameBoy
   class Core
-    attr_reader :bus, :cpu, :cartridge, :ppu, :timer, :interrupts, :joypad, :dma
+    attr_reader :bus, :cpu, :cartridge, :ppu, :timer, :interrupts, :joypad, :dma, :apu
 
     def initialize(rom_source)
       # Core は各デバイスを束ねる配線役。
@@ -11,7 +11,8 @@ module GameBoy
       @timer = Timer.new(@interrupts)
       @joypad = Joypad.new(@interrupts)
       @dma = DMA.new(@ppu)
-      @bus = Bus.new(@cartridge, @ppu, @timer, @interrupts, @joypad, @dma)
+      @apu = APU.new
+      @bus = Bus.new(@cartridge, @ppu, @timer, @interrupts, @joypad, @dma, @apu)
       @cpu = CPU.new(@bus, @interrupts)
 
       reset
@@ -25,6 +26,7 @@ module GameBoy
       @joypad.reset
       @ppu.reset
       @dma.reset
+      @apu.reset
       BootState.apply!(self)
     end
 
@@ -33,6 +35,9 @@ module GameBoy
     end
 
     def step
+      falling_edge = @joypad.consume_falling_edge?
+      @cpu.wake_stop if @joypad.wake_condition_met? || falling_edge
+
       # CPU が消費した dot 数を、周辺デバイスへそのまま配る。
       dots = @cpu.step
       @dma.tick(dots)
@@ -56,8 +61,10 @@ module GameBoy
       steps = 0
 
       until @ppu.frame_ready?
-        total_dots += step
+        dots = step
+        total_dots += dots
         steps += 1
+        break if dots == 0
         break if max_steps && steps >= max_steps
       end
 
