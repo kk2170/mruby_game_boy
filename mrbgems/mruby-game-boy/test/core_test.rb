@@ -126,6 +126,37 @@ assert('GameBoy::Serial completes internal clock transfer after 4096 dots') do
   assert_equal 0x08, core.interrupts.read_if & 0x08
 end
 
+assert('GameBoy::Serial services internal clock interrupt on the following step') do
+  rom = Array.new(0x8000, 0)
+  rom[0x0147] = 0x00
+  rom[0x0100] = 0xFB
+
+  core = GameBoy::Core.new(rom)
+  core.interrupts.write_ie(0x08)
+  core.interrupts.write_if(0xE0)
+  core.bus.write8(0xFF01, 0x42)
+  core.bus.write8(0xFF02, 0x81)
+
+  core.step
+  core.run_steps(1022)
+
+  assert_equal 0x00, core.interrupts.read_if & 0x08
+
+  core.step
+
+  assert_equal 0x0500, core.cpu.pc
+  assert_equal 0x08, core.interrupts.read_if & 0x08
+
+  cycles = core.step
+
+  assert_equal 20, cycles
+  assert_equal 0x0058, core.cpu.pc
+  assert_equal 0xFFFC, core.cpu.sp
+  assert_equal 0x00, core.bus.read8(0xFFFC)
+  assert_equal 0x05, core.bus.read8(0xFFFD)
+  assert_equal 0xE0, core.interrupts.read_if
+end
+
 assert('GameBoy::Serial does not advance external clock transfer') do
   rom = Array.new(0x8000, 0)
   rom[0x0147] = 0x00
@@ -459,6 +490,36 @@ assert('GameBoy::CPU STOP wakes on selected joypad line falling edge') do
   assert_equal 4, cycles
   assert_equal 0x0113, core.cpu.bc
   assert_equal 0x0103, core.cpu.pc
+end
+
+assert('GameBoy::CPU STOP wake services joypad interrupt before next opcode') do
+  rom = Array.new(0x8000, 0)
+  rom[0x0147] = 0x00
+  rom[0x0100] = 0xFB
+  rom[0x0101] = 0x10
+  rom[0x0102] = 0x00
+
+  core = GameBoy::Core.new(rom)
+  core.interrupts.write_ie(0x10)
+  core.interrupts.write_if(0xE0)
+
+  core.step
+  core.step
+
+  assert_equal 0, core.step
+
+  core.press_button(:a)
+
+  assert_equal 0x10, core.interrupts.read_if & 0x10
+
+  cycles = core.step
+
+  assert_equal 20, cycles
+  assert_equal 0x0060, core.cpu.pc
+  assert_equal 0xFFFC, core.cpu.sp
+  assert_equal 0x03, core.bus.read8(0xFFFC)
+  assert_equal 0x01, core.bus.read8(0xFFFD)
+  assert_equal 0xE0, core.interrupts.read_if
 end
 
 assert('GameBoy::CPU STOP stays stopped for unselected joypad press') do
