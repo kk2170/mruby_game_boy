@@ -1,13 +1,25 @@
 # mruby_game_boy
 
+[Japanese README](README.ja.md)
+
 Pure mruby first Game Boy emulator workspace.
 
 ## Current scope
 
 - DMG only
 - pure mruby only
+- boot ROM skipped for now; starts from DMG post-boot state
 - headless core first
 - TobuTobuGirl ROM used as the default smoke ROM
+
+## Current implementation status
+
+- CPU execution is still partial, but boot-state startup, interrupt entry, JR, conditional CALL, HALT bug, and STOP stop/wake behavior are covered by regression tests
+- PPU includes scanline timing, VBlank, a 160x144 framebuffer, BG/Window/OBJ rendering, DMG sprite priority rules, and VRAM/OAM access restrictions
+- Cartridge support includes ROM Only and basic MBC1
+- APU currently models register state and wave RAM, including NR52 power/status handling, but does not produce audio yet
+- Serial covers boot-state registers, internal clock transfer completion, interrupt request timing, and the external-clock no-progress case
+- Targeted tests live in `mrbgems/mruby-game-boy/test/core_test.rb` for CPU, STOP, APU, Serial, PPU, DMA, and Joypad behavior
 
 ## Project layout
 
@@ -35,6 +47,54 @@ If you want the **mruby SDL2 frontend**, build with:
 GAME_BOY_ENABLE_SDL2=1 ../mruby/minirake
 ```
 
+## Run
+
+Run the headless runner:
+
+```sh
+mruby apps/headless_runner.rb test_roms/tobutobugirl/tobu.gb 32
+```
+
+- arg1: ROM path
+- arg2: number of CPU steps to execute after boot-state setup
+
+Dump a frame as PPM:
+
+```sh
+mruby apps/frame_dump.rb test_roms/tobutobugirl/tobu.gb tmp/tobutobugirl/frame.ppm 30 2
+```
+
+Linux/X preview flow:
+
+```sh
+mruby apps/linux_x_preview.rb test_roms/tobutobugirl/tobu.gb tmp/linux_x_preview 20 10 3
+feh --reload 0.1 tmp/linux_x_preview/frame_*.ppm
+```
+
+Run the SDL2 frontend:
+
+```sh
+mruby apps/sdl2_frontend.rb test_roms/tobutobugirl/tobu.gb 4 mruby_game_boy
+```
+
+If you built inside Docker, the mruby binary is typically here:
+
+```sh
+/opt/mruby/bin/mruby
+```
+
+ROM files are not included in the public repository. Place your local ROMs under `test_roms/...` such as `test_roms/tobutobugirl/tobu.gb`.
+
+PPM is used because it keeps the emulator core pure mruby and can still be viewed easily on Linux/X.
+
+## Test
+
+Run the mruby test suite from your local mruby checkout:
+
+```sh
+../mruby/minirake test
+```
+
 ## Docker build/run (recommended)
 
 First build the image and mruby toolchain:
@@ -58,50 +118,15 @@ export XAUTHORITY=${XAUTHORITY:-$HOME/.Xauthority}
 bash docker/run_sdl2.sh test_roms/tobutobugirl/tobu.gb 4 mruby_game_boy
 ```
 
+Run the mruby test suite inside Docker:
+
+```sh
+docker compose run --rm mruby-dev \
+  bash -lc 'cd /opt/mruby && GAME_BOY_ENABLE_SDL2=1 MRUBY_CONFIG=/workspace/build_config.rb ./minirake test'
+```
+
 The Docker setup clones `mruby` into a named Docker volume on first run and keeps the emulator core repository mounted from the host.
 `docker/run_sdl2.sh` will also mount `/tmp/.X11-unix` and `.Xauthority` when available.
-
-## Run the headless runner
-
-```sh
-mruby apps/headless_runner.rb
-```
-
-If you built inside Docker, the mruby binary is typically here:
-
-```sh
-/opt/mruby/bin/mruby
-```
-
-Optional arguments:
-
-```sh
-mruby apps/headless_runner.rb test_roms/tobutobugirl/tobu.gb 32
-```
-
-- arg1: ROM path
-- arg2: number of CPU steps to execute after boot-state setup
-
-The current CPU implementation is intentionally partial. It is enough for ROM loading and early bootstrap stepping, but not a full emulator yet.
-
-TobuTobuGirl uses an MBC1 cartridge (`0x03`), so the scaffold already includes a basic MBC1 mapper.
-
-ROM 本体は公開リポジトリには含めていません。ローカルで `test_roms/tobutobugirl/tobu.gb` などに配置して使ってください。
-
-## Dump a frame as PPM
-
-```sh
-mruby apps/frame_dump.rb test_roms/tobutobugirl/tobu.gb tmp/tobutobugirl/frame.ppm 30 2
-```
-
-## Linux/X preview flow
-
-```sh
-mruby apps/linux_x_preview.rb test_roms/tobutobugirl/tobu.gb tmp/linux_x_preview 20 10 3
-feh --reload 0.1 tmp/linux_x_preview/frame_*.ppm
-```
-
-PPM is used because it keeps the emulator core pure mruby and can still be viewed easily on Linux/X.
 
 ## SDL2 frontend
 
