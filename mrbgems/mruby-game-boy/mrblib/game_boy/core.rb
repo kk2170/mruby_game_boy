@@ -1,6 +1,6 @@
 module GameBoy
   class Core
-    attr_reader :bus, :cpu, :cartridge, :ppu, :timer, :interrupts, :joypad, :dma, :apu
+    attr_reader :bus, :cpu, :cartridge, :ppu, :timer, :interrupts, :joypad, :dma, :apu, :serial
 
     def initialize(rom_source)
       # Core は各デバイスを束ねる配線役。
@@ -12,7 +12,8 @@ module GameBoy
       @joypad = Joypad.new(@interrupts)
       @dma = DMA.new(@ppu)
       @apu = APU.new
-      @bus = Bus.new(@cartridge, @ppu, @timer, @interrupts, @joypad, @dma, @apu)
+      @serial = Serial.new(@interrupts)
+      @bus = Bus.new(@cartridge, @ppu, @timer, @interrupts, @joypad, @dma, @apu, @serial)
       @cpu = CPU.new(@bus, @interrupts)
 
       reset
@@ -27,6 +28,7 @@ module GameBoy
       @ppu.reset
       @dma.reset
       @apu.reset
+      @serial.reset
       BootState.apply!(self)
     end
 
@@ -42,6 +44,7 @@ module GameBoy
       dots = @cpu.step
       @dma.tick(dots)
       @timer.tick(dots)
+      @serial.tick(dots)
       @ppu.tick(dots)
       dots
     end

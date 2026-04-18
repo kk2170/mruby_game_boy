@@ -8,7 +8,6 @@ module GameBoy
       0xFF1E => 0x04,
       0xFF23 => 0x08
     }.freeze
-
     def initialize
       reset
     end
@@ -48,12 +47,12 @@ module GameBoy
 
     def read_io(addr)
       case addr
+      when 0xFF15, 0xFF1F, 0xFF27..0xFF2F
+        0xFF
       when 0xFF10..0xFF25
         @registers[addr]
       when 0xFF26
         0x70 | (@power_on ? 0x80 : 0x00) | (@channel_status & 0x0F)
-      when 0xFF27..0xFF2F
-        0xFF
       when 0xFF30..0xFF3F
         @wave_ram[addr - 0xFF30]
       else
@@ -69,10 +68,13 @@ module GameBoy
         write_nr52(value)
       when 0xFF30..0xFF3F
         @wave_ram[addr - 0xFF30] = value
+      when 0xFF15, 0xFF1F, 0xFF27..0xFF2F
+        return value
       when 0xFF10..0xFF25
         return value unless @power_on
 
         @registers[addr] = value
+        update_dac_status(addr)
         trigger_channel(addr, value)
       end
 
@@ -111,9 +113,46 @@ module GameBoy
 
       status_bit = STATUS_BITS[addr]
       return unless status_bit
+      return unless dac_enabled_for_trigger?(addr)
 
       @channel_status |= status_bit
       @registers[0xFF26] = 0x80 | (@channel_status & 0x0F)
+    end
+
+    def update_dac_status(addr)
+      channel_bit = case addr
+                    when 0xFF12 then 0x01
+                    when 0xFF17 then 0x02
+                    when 0xFF1A then 0x04
+                    when 0xFF21 then 0x08
+                    end
+      return unless channel_bit
+      return if dac_enabled?(addr)
+
+      @channel_status &= (~channel_bit) & 0x0F
+      @registers[0xFF26] = 0x80 | (@channel_status & 0x0F)
+    end
+
+    def dac_enabled_for_trigger?(addr)
+      case addr
+      when 0xFF14 then dac_enabled?(0xFF12)
+      when 0xFF19 then dac_enabled?(0xFF17)
+      when 0xFF1E then dac_enabled?(0xFF1A)
+      when 0xFF23 then dac_enabled?(0xFF21)
+      else
+        true
+      end
+    end
+
+    def dac_enabled?(addr)
+      case addr
+      when 0xFF12, 0xFF17, 0xFF21
+        (@registers[addr] & 0xF8) != 0
+      when 0xFF1A
+        (@registers[addr] & 0x80) != 0
+      else
+        true
+      end
     end
   end
 end

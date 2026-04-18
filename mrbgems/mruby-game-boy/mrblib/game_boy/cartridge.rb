@@ -1,5 +1,7 @@
 module GameBoy
   module Cartridge
+    PRINTABLE_ASCII = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+
     ROM_SIZE_BYTES = {
       0x00 => 32 * 1024,
       0x01 => 64 * 1024,
@@ -102,18 +104,22 @@ module GameBoy
     end
 
     def self.parse_title(rom_bytes)
-      chars = []
+      title = String.new
       index = 0x0134
 
       while index <= 0x0143
         byte = byte_at(rom_bytes, index) || 0
         break if byte == 0
 
-        chars << byte.chr
+        title += if byte >= 0x20 && byte <= 0x7E
+                   PRINTABLE_ASCII[byte - 0x20, 1]
+                 else
+                   '?'
+                 end
         index += 1
       end
 
-      chars.join
+      title
     end
   end
 end

@@ -1,6 +1,6 @@
 module GameBoy
   class Bus
-    def initialize(cartridge, ppu, timer, interrupts, joypad, dma, apu)
+    def initialize(cartridge, ppu, timer, interrupts, joypad, dma, apu, serial)
       # CPU はメモリを直接触らず、必ず Bus 経由でアクセスする。
       # ここでアドレス空間を各デバイスに振り分ける。
       @cartridge = cartridge
@@ -10,6 +10,7 @@ module GameBoy
       @joypad = joypad
       @dma = dma
       @apu = apu
+      @serial = serial
 
       reset
     end
@@ -50,6 +51,8 @@ module GameBoy
         0xFF
       when 0xFF00
         @joypad.read_p1
+      when 0xFF01..0xFF02
+        @serial.read_io(addr)
       when 0xFF04..0xFF07
         @timer.read_io(addr)
       when 0xFF0F
@@ -89,6 +92,8 @@ module GameBoy
         @ppu.write_oam(addr, value) if @ppu.oam_accessible?(@dma.active?)
       when 0xFF00
         @joypad.write_p1(value)
+      when 0xFF01..0xFF02
+        @serial.write_io(addr, value)
       when 0xFF04..0xFF07
         @timer.write_io(addr, value)
       when 0xFF0F

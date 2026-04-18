@@ -2,8 +2,6 @@ module GameBoy
   class BootState
     # Boot ROM をまだ実行しない段階なので、DMG の起動直後に近い値を直接入れる。
     IO_DEFAULTS = {
-      0xFF01 => 0x00,
-      0xFF02 => 0x7E,
       0xFF10 => 0x80,
       0xFF11 => 0xBF,
       0xFF12 => 0xF3,
@@ -48,6 +46,7 @@ module GameBoy
       core.joypad.load_boot_state(0xCF)
       core.dma.load_boot_state(0xFF, 0)
       core.apu.load_boot_state(apu_defaults)
+      core.serial.load_boot_state(0x00, 0x7E)
       core.ppu.load_boot_state(
         lcdc: 0x91,
         stat_select: 0x00,

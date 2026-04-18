@@ -303,7 +303,7 @@ module GameBoy
       # で最上位の sprite pixel を 1 個だけ選ぶ。
       # BG over OBJ は、その後で選ばれた pixel に対してだけ適用する。
       sprite_bases = visible_sprite_bases_for_line(line)
-      draw_order = sprite_bases.sort_by { |base| [@oam[base + 1], base] }
+      draw_order = sort_sprite_bases_for_draw(sprite_bases)
       sprite_height = obj_height
 
       screen_x = 0
@@ -413,6 +413,43 @@ module GameBoy
       end
 
       bases
+    end
+
+    def sort_sprite_bases_for_draw(sprite_bases)
+      sorted = []
+      index = 0
+
+      while index < sprite_bases.length
+        sorted << sprite_bases[index]
+        index += 1
+      end
+
+      left = 0
+      while left < sorted.length
+        best = left
+        right = left + 1
+
+        while right < sorted.length
+          current_base = sorted[right]
+          best_base = sorted[best]
+          current_x = @oam[current_base + 1] || 0
+          best_x = @oam[best_base + 1] || 0
+
+          best = right if current_x < best_x || (current_x == best_x && current_base < best_base)
+
+          right += 1
+        end
+
+        if best != left
+          temp = sorted[left]
+          sorted[left] = sorted[best]
+          sorted[best] = temp
+        end
+
+        left += 1
+      end
+
+      sorted
     end
 
     def sprite_hidden_by_bg?(attributes, bg_color_id)

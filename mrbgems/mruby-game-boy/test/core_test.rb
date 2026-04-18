@@ -27,6 +27,28 @@ def write_test_sprite_tile(ppu, tile_index, lo_byte, hi_byte = 0x00)
   end
 end
 
+class GameBoy::PPU
+  def render_scanline_for_test
+    render_scanline
+  end
+
+  def render_sprites_for_test(line, offset, bg_color_ids)
+    render_sprites(line, offset, bg_color_ids)
+  end
+end
+
+def build_test_rom(size, bytes = {})
+  rom = Array.new(size, 0)
+  index = 0
+
+  while index < size
+    rom[index] = bytes[index] || 0
+    index += 1
+  end
+
+  rom
+end
+
 assert('GameBoy::Cartridge parses Tobu-style header fields') do
   rom = Array.new(0x8000, 0)
   title = 'TOBU'
@@ -75,6 +97,50 @@ assert('GameBoy::Bus routes APU register reads from boot state') do
   assert_equal 0xFF, core.bus.read8(0xFF27)
 end
 
+assert('GameBoy::Serial exposes boot state without io stub fallback') do
+  rom = Array.new(0x8000, 0)
+  rom[0x0147] = 0x00
+  core = GameBoy::Core.new(rom)
+
+  assert_equal 0x00, core.bus.read8(0xFF01)
+  assert_equal 0x7E, core.bus.read8(0xFF02)
+end
+
+assert('GameBoy::Serial completes internal clock transfer after 4096 dots') do
+  rom = Array.new(0x8000, 0)
+  rom[0x0147] = 0x00
+  core = GameBoy::Core.new(rom)
+
+  core.interrupts.write_if(0xE0)
+  core.bus.write8(0xFF01, 0x42)
+  core.bus.write8(0xFF02, 0x81)
+
+  core.run_steps(1023)
+  assert_equal 0x42, core.bus.read8(0xFF01)
+  assert_equal 0x00, core.interrupts.read_if & 0x08
+
+  core.step
+
+  assert_equal 0xFF, core.bus.read8(0xFF01)
+  assert_equal 0x7F, core.bus.read8(0xFF02)
+  assert_equal 0x08, core.interrupts.read_if & 0x08
+end
+
+assert('GameBoy::Serial does not advance external clock transfer') do
+  rom = Array.new(0x8000, 0)
+  rom[0x0147] = 0x00
+  core = GameBoy::Core.new(rom)
+
+  core.interrupts.write_if(0xE0)
+  core.bus.write8(0xFF01, 0x42)
+  core.bus.write8(0xFF02, 0x80)
+  core.run_steps(1024)
+
+  assert_equal 0x42, core.bus.read8(0xFF01)
+  assert_equal 0xFE, core.bus.read8(0xFF02)
+  assert_equal 0x00, core.interrupts.read_if & 0x08
+end
+
 assert('GameBoy::APU stores wave RAM through bus') do
   rom = Array.new(0x8000, 0)
   rom[0x0147] = 0x00
@@ -87,16 +153,28 @@ assert('GameBoy::APU stores wave RAM through bus') do
   assert_equal 0x34, core.bus.read8(0xFF3F)
 end
 
-assert('GameBoy::APU updates NR52 status on trigger and power off') do
+assert('GameBoy::APU updates NR52 status on DAC-aware trigger and power off') do
   rom = Array.new(0x8000, 0)
   rom[0x0147] = 0x00
   core = GameBoy::Core.new(rom)
 
+  core.bus.write8(0xFF26, 0x00)
   core.bus.write8(0xFF26, 0x80)
+  core.bus.write8(0xFF12, 0x00)
+  core.bus.write8(0xFF14, 0x80)
+
+  assert_equal 0xF0, core.bus.read8(0xFF26)
+
+  core.bus.write8(0xFF12, 0x77)
+  core.bus.write8(0xFF17, 0x77)
   core.bus.write8(0xFF14, 0x80)
   core.bus.write8(0xFF19, 0x80)
 
   assert_equal 0xF3, core.bus.read8(0xFF26)
+
+  core.bus.write8(0xFF12, 0x00)
+
+  assert_equal 0xF2, core.bus.read8(0xFF26)
 
   core.bus.write8(0xFF12, 0x77)
   core.bus.write8(0xFF26, 0x00)
@@ -108,12 +186,30 @@ assert('GameBoy::APU updates NR52 status on trigger and power off') do
   assert_equal 0x00, core.bus.read8(0xFF12)
 end
 
+assert('GameBoy::APU returns 0xFF for unused hole registers and ignores writes') do
+  rom = Array.new(0x8000, 0)
+  rom[0x0147] = 0x00
+  core = GameBoy::Core.new(rom)
+
+  assert_equal 0xFF, core.bus.read8(0xFF15)
+  assert_equal 0xFF, core.bus.read8(0xFF1F)
+
+  core.bus.write8(0xFF26, 0x80)
+  core.bus.write8(0xFF15, 0x12)
+  core.bus.write8(0xFF1F, 0x34)
+
+  assert_equal 0xFF, core.bus.read8(0xFF15)
+  assert_equal 0xFF, core.bus.read8(0xFF1F)
+end
+
 assert('GameBoy::Cartridge builds basic MBC1 cartridges') do
-  rom = Array.new(256 * 1024, 0)
-  rom[0x0147] = 0x03
-  rom[0x0148] = 0x03
-  rom[0x0149] = 0x02
-  rom[0x4000] = 0x42
+  rom = build_test_rom(
+    0x8000,
+    0x0147 => 0x03,
+    0x0148 => 0x03,
+    0x0149 => 0x02,
+    0x4000 => 0x42
+  )
 
   cart = GameBoy::Cartridge.build(rom)
 
@@ -151,8 +247,9 @@ end
 assert('GameBoy::FrameExporter outputs PPM header') do
   frame = Array.new(GameBoy::Constants::SCREEN_WIDTH * GameBoy::Constants::SCREEN_HEIGHT, 0)
   ppm = GameBoy::FrameExporter.to_ppm(frame, 1)
+  header = "P3\n160 144\n255\n"
 
-  assert_true ppm.start_with?("P6\n160 144\n255\n")
+  assert_equal header, ppm[0, header.length]
 end
 
 assert('GameBoy::PPU ignores writes to LY') do
@@ -184,7 +281,7 @@ assert('GameBoy::PPU counts off-screen X sprites toward 10 sprite limit') do
   ppu.write_oam(base + 2, 0)
   ppu.write_oam(base + 3, 0)
 
-  ppu.send(:render_scanline)
+  ppu.render_scanline_for_test
 
   assert_equal 0, ppu.frame_buffer[0]
 end
@@ -206,7 +303,7 @@ assert('GameBoy::PPU gives smaller X sprite higher DMG priority') do
   ppu.write_oam(0xFE06, 1)
   ppu.write_oam(0xFE07, 0x10)
 
-  ppu.send(:render_scanline)
+  ppu.render_scanline_for_test
 
   assert_equal 2, ppu.frame_buffer[4]
 end
@@ -226,7 +323,7 @@ assert('GameBoy::PPU uses earlier OAM sprite when X is tied') do
   ppu.write_oam(0xFE06, 1)
   ppu.write_oam(0xFE07, 0x10)
 
-  ppu.send(:render_scanline)
+  ppu.render_scanline_for_test
 
   assert_equal 1, ppu.frame_buffer[0]
 end
@@ -249,7 +346,7 @@ assert('GameBoy::PPU bg-over-obj masks lower priority sprites too') do
   ppu.write_oam(0xFE06, 1)
   ppu.write_oam(0xFE07, 0x10)
 
-  ppu.send(:render_sprites, 0, 0, bg_color_ids)
+  ppu.render_sprites_for_test(0, 0, bg_color_ids)
 
   assert_equal 0, ppu.frame_buffer[0]
 end
@@ -362,6 +459,23 @@ assert('GameBoy::CPU STOP wakes on selected joypad line falling edge') do
   assert_equal 4, cycles
   assert_equal 0x0113, core.cpu.bc
   assert_equal 0x0103, core.cpu.pc
+end
+
+assert('GameBoy::CPU STOP stays stopped for unselected joypad press') do
+  rom = Array.new(0x8000, 0)
+  rom[0x0147] = 0x00
+  rom[0x0100] = 0x10
+  rom[0x0101] = 0x00
+  rom[0x0102] = 0x04
+
+  core = GameBoy::Core.new(rom)
+  core.bus.write8(0xFF00, 0x20)
+  core.step
+
+  core.press_button(:a)
+
+  assert_equal 0, core.step
+  assert_equal 0x0102, core.cpu.pc
 end
 
 assert('GameBoy::CPU STOP does not remain stopped when wake condition is already met') do

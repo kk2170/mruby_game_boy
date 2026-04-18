@@ -22,7 +22,7 @@ module GameBoy
     def self.to_ppm(frame_buffer, scale = 1)
       width = Constants::SCREEN_WIDTH * scale
       height = Constants::SCREEN_HEIGHT * scale
-      output = "P6\n#{width} #{height}\n255\n"
+      output = "P3\n#{width} #{height}\n255\n"
 
       y = 0
       while y < Constants::SCREEN_HEIGHT
@@ -31,10 +31,10 @@ module GameBoy
 
         while x < Constants::SCREEN_WIDTH
           r, g, b = DMG_RGB[frame_buffer[y * Constants::SCREEN_WIDTH + x] || 0]
-          pixel = r.chr + g.chr + b.chr
+          pixel = "#{r} #{g} #{b}\n"
           repeat = 0
           while repeat < scale
-            scaled_line << pixel
+            scaled_line += pixel
             repeat += 1
           end
           x += 1
@@ -42,7 +42,7 @@ module GameBoy
 
         repeat_y = 0
         while repeat_y < scale
-          output << scaled_line
+          output += scaled_line
           repeat_y += 1
         end
 
@@ -62,7 +62,7 @@ module GameBoy
         x = 0
         while x < Constants::SCREEN_WIDTH
           shade = frame_buffer[y * Constants::SCREEN_WIDTH + x] || 0
-          line << ASCII_SHADES[shade]
+          line += ASCII_SHADES[shade]
           x += x_step
         end
         lines << line
