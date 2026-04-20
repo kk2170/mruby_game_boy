@@ -38,15 +38,26 @@ class GameBoy::PPU
 end
 
 def build_test_rom(size, bytes = {})
-  rom = Array.new(size, 0)
+  rom = "\x00" * size
   index = 0
 
   while index < size
-    rom[index] = bytes[index] || 0
+    rom.setbyte(index, bytes[index] || 0)
     index += 1
   end
 
   rom
+end
+
+def build_test_mbc1_rom(cartridge_type: 0x03, rom_size_code: 0x03, ram_size_code: 0x03, bytes: {})
+  build_test_rom(
+    GameBoy::Cartridge::ROM_SIZE_BYTES[rom_size_code],
+    {
+      0x0147 => cartridge_type,
+      0x0148 => rom_size_code,
+      0x0149 => ram_size_code
+    }.merge(bytes)
+  )
 end
 
 assert('GameBoy::Cartridge parses Tobu-style header fields') do
@@ -106,6 +117,42 @@ assert('GameBoy::Serial exposes boot state without io stub fallback') do
   assert_equal 0x7E, core.bus.read8(0xFF02)
 end
 
+assert('GameBoy::Bus returns 0xFF for unused IO holes and ignores writes') do
+  rom = Array.new(0x8000, 0)
+  rom[0x0147] = 0x00
+  core = GameBoy::Core.new(rom)
+
+  [0xFF03, 0xFF08, 0xFF09, 0xFF0A, 0xFF0B, 0xFF0C, 0xFF0D, 0xFF0E].each do |addr|
+    core.bus.write8(addr, 0x12)
+    assert_equal 0xFF, core.bus.read8(addr)
+  end
+end
+
+assert('GameBoy::Bus treats representative CGB-only registers as DMG-unused') do
+  rom = Array.new(0x8000, 0)
+  rom[0x0147] = 0x00
+  core = GameBoy::Core.new(rom)
+
+  [0xFF4D, 0xFF4F, 0xFF55, 0xFF70].each do |addr|
+    core.bus.write8(addr, 0x12)
+    assert_equal 0xFF, core.bus.read8(addr)
+  end
+end
+
+assert('GameBoy::Bus exposes FF50 as a one-way boot disable latch') do
+  rom = Array.new(0x8000, 0)
+  rom[0x0147] = 0x00
+  core = GameBoy::Core.new(rom)
+
+  assert_equal 0x01, core.bus.read8(0xFF50)
+
+  core.bus.write8(0xFF50, 0x00)
+  assert_equal 0x01, core.bus.read8(0xFF50)
+
+  core.bus.write8(0xFF50, 0x42)
+  assert_equal 0x01, core.bus.read8(0xFF50)
+end
+
 assert('GameBoy::Serial completes internal clock transfer after 4096 dots') do
   rom = Array.new(0x8000, 0)
   rom[0x0147] = 0x00
@@ -157,6 +204,53 @@ assert('GameBoy::Serial services internal clock interrupt on the following step'
   assert_equal 0xE0, core.interrupts.read_if
 end
 
+assert('GameBoy::Serial resets internal clock transfer timing on FF02 rewrite') do
+  rom = Array.new(0x8000, 0)
+  rom[0x0147] = 0x00
+  core = GameBoy::Core.new(rom)
+
+  core.interrupts.write_if(0xE0)
+  core.bus.write8(0xFF01, 0x42)
+  core.bus.write8(0xFF02, 0x81)
+
+  core.run_steps(512)
+  core.bus.write8(0xFF02, 0x81)
+  core.run_steps(1023)
+
+  assert_equal 0x42, core.bus.read8(0xFF01)
+  assert_equal 0x00, core.interrupts.read_if & 0x08
+
+  core.step
+
+  assert_equal 0xFF, core.bus.read8(0xFF01)
+  assert_equal 0x7F, core.bus.read8(0xFF02)
+  assert_equal 0x08, core.interrupts.read_if & 0x08
+end
+
+assert('GameBoy::Serial leaves IF pending when transfer completes with IME disabled') do
+  rom = Array.new(0x8000, 0)
+  rom[0x0147] = 0x00
+  core = GameBoy::Core.new(rom)
+
+  core.interrupts.write_ie(0x08)
+  core.interrupts.write_if(0xE0)
+  core.bus.write8(0xFF01, 0x42)
+  core.bus.write8(0xFF02, 0x81)
+  core.run_steps(1023)
+
+  core.step
+
+  assert_equal 0x0500, core.cpu.pc
+  assert_equal 0x08, core.interrupts.read_if & 0x08
+
+  cycles = core.step
+
+  assert_equal 4, cycles
+  assert_equal 0x0501, core.cpu.pc
+  assert_equal 0xFFFE, core.cpu.sp
+  assert_equal 0x08, core.interrupts.read_if & 0x08
+end
+
 assert('GameBoy::Serial does not advance external clock transfer') do
   rom = Array.new(0x8000, 0)
   rom[0x0147] = 0x00
@@ -170,6 +264,109 @@ assert('GameBoy::Serial does not advance external clock transfer') do
   assert_equal 0x42, core.bus.read8(0xFF01)
   assert_equal 0xFE, core.bus.read8(0xFF02)
   assert_equal 0x00, core.interrupts.read_if & 0x08
+end
+
+assert('GameBoy::Timer increments DIV every 256 dots') do
+  timer = GameBoy::Timer.new(GameBoy::Interrupts.new)
+
+  timer.tick(255)
+  assert_equal 0x00, timer.read_io(0xFF04)
+
+  timer.tick(1)
+  assert_equal 0x01, timer.read_io(0xFF04)
+
+  timer.tick(256)
+  assert_equal 0x02, timer.read_io(0xFF04)
+end
+
+assert('GameBoy::Timer increments TIMA on selected divider bit falling edge') do
+  frequencies = {
+    0x00 => 1024,
+    0x01 => 16,
+    0x02 => 64,
+    0x03 => 256
+  }
+
+  frequencies.each do |select, period|
+    timer = GameBoy::Timer.new(GameBoy::Interrupts.new)
+    timer.write_io(0xFF07, 0x04 | select)
+
+    timer.tick(period - 1)
+    assert_equal 0x00, timer.read_io(0xFF05)
+
+    timer.tick(1)
+    assert_equal 0x01, timer.read_io(0xFF05)
+  end
+end
+
+assert('GameBoy::Timer delays TIMA reload and TIMER IF request by 4 dots after overflow') do
+  interrupts = GameBoy::Interrupts.new
+  timer = GameBoy::Timer.new(interrupts)
+
+  timer.write_io(0xFF06, 0xAB)
+  timer.write_io(0xFF05, 0xFF)
+  timer.write_io(0xFF07, 0x05)
+  interrupts.write_if(0xE0)
+
+  timer.tick(16)
+  assert_equal 0x00, timer.read_io(0xFF05)
+  assert_equal 0x00, interrupts.read_if & 0x04
+
+  timer.tick(3)
+  assert_equal 0x00, timer.read_io(0xFF05)
+  assert_equal 0x00, interrupts.read_if & 0x04
+
+  timer.tick(1)
+  assert_equal 0xAB, timer.read_io(0xFF05)
+  assert_equal 0x04, interrupts.read_if & 0x04
+end
+
+assert('GameBoy::Timer keeps FF07 falling-edge glitch while delaying overflow reload') do
+  interrupts = GameBoy::Interrupts.new
+  timer = GameBoy::Timer.new(interrupts)
+
+  timer.write_io(0xFF06, 0xCD)
+  timer.write_io(0xFF05, 0xFF)
+  timer.write_io(0xFF07, 0x05)
+  interrupts.write_if(0xE0)
+
+  timer.tick(8)
+  timer.write_io(0xFF07, 0x00)
+
+  assert_equal 0x00, timer.read_io(0xFF05)
+  assert_equal 0x00, interrupts.read_if & 0x04
+
+  timer.tick(4)
+  assert_equal 0xCD, timer.read_io(0xFF05)
+  assert_equal 0x04, interrupts.read_if & 0x04
+end
+
+assert('GameBoy::Timer resets divider phase on DIV write') do
+  timer = GameBoy::Timer.new(GameBoy::Interrupts.new)
+  timer.write_io(0xFF07, 0x05)
+
+  timer.tick(4)
+  timer.write_io(0xFF04, 0x12)
+
+  assert_equal 0x00, timer.read_io(0xFF04)
+
+  timer.tick(15)
+  assert_equal 0x00, timer.read_io(0xFF05)
+
+  timer.tick(1)
+  assert_equal 0x01, timer.read_io(0xFF05)
+end
+
+assert('GameBoy::Core preserves post-boot timer divider phase') do
+  rom = Array.new(0x8000, 0)
+  rom[0x0147] = 0x00
+  core = GameBoy::Core.new(rom)
+
+  core.bus.write8(0xFF07, 0x05)
+  assert_equal 0x00, core.bus.read8(0xFF05)
+
+  assert_equal 4, core.step
+  assert_equal 0x01, core.bus.read8(0xFF05)
 end
 
 assert('GameBoy::APU stores wave RAM through bus') do
@@ -217,6 +414,42 @@ assert('GameBoy::APU updates NR52 status on DAC-aware trigger and power off') do
   assert_equal 0x00, core.bus.read8(0xFF12)
 end
 
+assert('GameBoy::APU updates NR52 status for CH3 and CH4 DAC-aware triggers') do
+  rom = Array.new(0x8000, 0)
+  rom[0x0147] = 0x00
+  core = GameBoy::Core.new(rom)
+
+  core.bus.write8(0xFF26, 0x00)
+  core.bus.write8(0xFF26, 0x80)
+  core.bus.write8(0xFF1A, 0x00)
+  core.bus.write8(0xFF1E, 0x80)
+
+  assert_equal 0xF0, core.bus.read8(0xFF26)
+
+  core.bus.write8(0xFF1A, 0x80)
+  core.bus.write8(0xFF1E, 0x80)
+
+  assert_equal 0xF4, core.bus.read8(0xFF26)
+
+  core.bus.write8(0xFF1A, 0x00)
+
+  assert_equal 0xF0, core.bus.read8(0xFF26)
+
+  core.bus.write8(0xFF21, 0x00)
+  core.bus.write8(0xFF23, 0x80)
+
+  assert_equal 0xF0, core.bus.read8(0xFF26)
+
+  core.bus.write8(0xFF21, 0x08)
+  core.bus.write8(0xFF23, 0x80)
+
+  assert_equal 0xF8, core.bus.read8(0xFF26)
+
+  core.bus.write8(0xFF21, 0x00)
+
+  assert_equal 0xF0, core.bus.read8(0xFF26)
+end
+
 assert('GameBoy::APU returns 0xFF for unused hole registers and ignores writes') do
   rom = Array.new(0x8000, 0)
   rom[0x0147] = 0x00
@@ -246,6 +479,90 @@ assert('GameBoy::Cartridge builds basic MBC1 cartridges') do
 
   assert_equal 'GameBoy::Cartridge::MBC1', cart.class.to_s
   assert_equal 0x42, cart.read8(0x4000)
+end
+
+assert('GameBoy::Cartridge::MBC1 keeps raw low5 bank bits before ROM-size masking') do
+  rom = "\x77" +
+        ("\x00" * 0x0146) +
+        "\x01" +
+        "\x03" +
+        ("\x00" * (0x4000 - 0x0149)) +
+        "\x42" +
+        ("\x00" * (0x40000 - 0x4001))
+
+  cart = GameBoy::Cartridge.build(rom)
+
+  assert_equal 0x42, cart.read8(0x4000)
+
+  cart.write8(0x2000, 0x00)
+  assert_equal 0x42, cart.read8(0x4000)
+
+  cart.write8(0x2000, 0x10)
+  assert_equal 0x77, cart.read8(0x4000)
+end
+
+assert('GameBoy::Core#reset resets MBC1 bank state without clearing RAM') do
+  rom = build_test_mbc1_rom(bytes: {
+    0x0000 => 0x44,
+    0x4000 => 0x11,
+    0x8000 => 0x22,
+    0xC000 => 0x33
+  })
+  core = GameBoy::Core.new(rom)
+
+  core.bus.write8(0x0000, 0x0A)
+  core.bus.write8(0x2000, 0x02)
+  core.bus.write8(0x4000, 0x01)
+  core.bus.write8(0x6000, 0x01)
+  core.bus.write8(0xA000, 0x5A)
+
+  assert_equal 0x22, core.bus.read8(0x4000)
+  assert_equal 0x5A, core.bus.read8(0xA000)
+
+  core.reset
+
+  # reset 後は bank 0 / mode 0 に戻るので、lower bank 側の内容が見える。
+  assert_equal 0x44, core.bus.read8(0x0000)
+  assert_equal 0x11, core.bus.read8(0x4000)
+  assert_equal 0xFF, core.bus.read8(0xA000)
+
+  core.bus.write8(0x0000, 0x0A)
+  core.bus.write8(0x4000, 0x01)
+  core.bus.write8(0x6000, 0x01)
+
+  assert_equal 0x5A, core.bus.read8(0xA000)
+end
+
+assert('GameBoy::Cartridge::MBC1 battery RAM dump/load roundtrips for type 0x03') do
+  rom = build_test_mbc1_rom
+  cart = GameBoy::Cartridge.build(rom)
+
+  assert_true cart.battery_backed?
+
+  cart.write8(0x0000, 0x0A)
+  cart.write8(0xA000, 0x12)
+  cart.write8(0xA001, 0x34)
+
+  dump = cart.dump_battery_ram
+  restored = GameBoy::Cartridge.build(rom)
+
+  restored.load_battery_ram(dump)
+  restored.write8(0x0000, 0x0A)
+
+  assert_equal 0x12, restored.read8(0xA000)
+  assert_equal 0x34, restored.read8(0xA001)
+end
+
+assert('GameBoy::Cartridge::RomOnly battery API stays inert') do
+  rom = build_test_rom(0x8000, 0x0147 => 0x00)
+  cart = GameBoy::Cartridge.build(rom)
+
+  assert_false cart.battery_backed?
+  assert_equal nil, cart.dump_battery_ram
+
+  cart.load_battery_ram([0x12, 0x34])
+
+  assert_equal 0xFF, cart.read8(0xA000)
 end
 
 assert('GameBoy::CPU JR uses post-immediate PC as base') do

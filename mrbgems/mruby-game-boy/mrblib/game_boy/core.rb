@@ -20,6 +20,8 @@ module GameBoy
     end
 
     def reset
+      # Boot ROM は走らせず、reset 後に BootState で DMG post-boot state (PC=0x0100 など) を直接適用する。
+      @cartridge.reset
       @bus.reset
       @cpu.reset
       @interrupts.reset

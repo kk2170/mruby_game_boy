@@ -14,6 +14,20 @@ module GameBoy
         @header[:title]
       end
 
+      def reset
+      end
+
+      def battery_backed?
+        false
+      end
+
+      def dump_battery_ram
+        nil
+      end
+
+      def load_battery_ram(_bytes)
+      end
+
       def read8(addr)
         case addr & 0xFFFF
         when 0x0000..0x7FFF

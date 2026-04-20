@@ -12,11 +12,37 @@ module GameBoy
         @ram_bank_count = [@header[:ram_size_bytes] / 0x2000, 1].max
         @ram = Array.new(@header[:ram_size_bytes], 0)
 
-        reset_banks
+        reset
       end
 
       def title
         @header[:title]
+      end
+
+      def reset
+        reset_banks
+      end
+
+      def battery_backed?
+        @header[:cartridge_type] == 0x03
+      end
+
+      def dump_battery_ram
+        return nil unless battery_backed?
+
+        @ram.dup
+      end
+
+      def load_battery_ram(bytes)
+        return unless battery_backed?
+
+        dump = Cartridge.normalize_bytes(bytes)
+        index = 0
+
+        while index < @ram.length
+          @ram[index] = Cartridge.byte_at(dump, index) || 0
+          index += 1
+        end
       end
 
       def read8(addr)
@@ -49,7 +75,6 @@ module GameBoy
           @ram_enabled = (value & 0x0F) == 0x0A
         when 0x2000..0x3FFF
           @rom_bank_low5 = value & 0x1F
-          @rom_bank_low5 = 1 if @rom_bank_low5 == 0
         when 0x4000..0x5FFF
           @bank_high2 = value & 0x03
         when 0x6000..0x7FFF
@@ -82,9 +107,7 @@ module GameBoy
       def upper_rom_bank
         # 4000-7FFF 側は mode 0 / mode 1 のどちらでも上位 2bit を使う。
         # mode 1 で変わるのは主に 0000-3FFF 側と RAM bank 側。
-        bank = ((@bank_high2 << 5) | @rom_bank_low5) % @rom_bank_count
-        bank = 1 if bank == 0 && @rom_bank_count > 1
-        bank
+        ((@bank_high2 << 5) | effective_rom_bank_low5) % @rom_bank_count
       end
 
       def ram_bank
@@ -95,6 +118,10 @@ module GameBoy
 
       def advanced_banking?
         @mode == 1
+      end
+
+      def effective_rom_bank_low5
+        @rom_bank_low5 == 0 ? 1 : @rom_bank_low5
       end
     end
   end

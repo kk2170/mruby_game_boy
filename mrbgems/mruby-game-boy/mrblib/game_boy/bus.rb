@@ -19,6 +19,12 @@ module GameBoy
       @wram = Array.new(0x2000, 0)
       @hram = Array.new(0x007F, 0)
       @io_stub = Array.new(0x0080, 0xFF)
+      @boot_rom_disabled = false
+    end
+
+    def disable_boot_rom
+      # 現状の FF50 は compatibility latch only。実際の Boot ROM mapping 切り替えはまだしていない。
+      @boot_rom_disabled = true
     end
 
     def load_boot_stub_io(values)
@@ -53,6 +59,8 @@ module GameBoy
         @joypad.read_p1
       when 0xFF01..0xFF02
         @serial.read_io(addr)
+      when 0xFF03, 0xFF08..0xFF0E
+        0xFF
       when 0xFF04..0xFF07
         @timer.read_io(addr)
       when 0xFF0F
@@ -64,6 +72,10 @@ module GameBoy
         @dma.read_io(addr)
       when 0xFF40..0xFF4B
         @ppu.read_io(addr)
+      when 0xFF50
+        @boot_rom_disabled ? 0x01 : 0x00
+      when 0xFF4C..0xFF7F
+        0xFF
       when 0xFF80..0xFFFE
         @hram[addr - 0xFF80]
       when 0xFFFF
@@ -94,6 +106,8 @@ module GameBoy
         @joypad.write_p1(value)
       when 0xFF01..0xFF02
         @serial.write_io(addr, value)
+      when 0xFF03, 0xFF08..0xFF0E
+        nil
       when 0xFF04..0xFF07
         @timer.write_io(addr, value)
       when 0xFF0F
@@ -105,6 +119,10 @@ module GameBoy
         @dma.start(value, self)
       when 0xFF40..0xFF4B
         @ppu.write_io(addr, value)
+      when 0xFF50
+        @boot_rom_disabled = true if value != 0
+      when 0xFF4C..0xFF7F
+        nil
       when 0xFF80..0xFFFE
         @hram[addr - 0xFF80] = value
       when 0xFFFF
