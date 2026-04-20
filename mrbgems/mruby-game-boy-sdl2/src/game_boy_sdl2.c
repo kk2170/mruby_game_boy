@@ -21,15 +21,25 @@ enum {
   GB_BUTTON_START = 0x80
 };
 
+enum {
+  GB_HOTKEY_PAUSE = 0x01,
+  GB_HOTKEY_RESET = 0x02,
+  GB_HOTKEY_SPEED = 0x04
+};
+
 typedef struct {
   SDL_Window *window;
   SDL_Renderer *renderer;
   SDL_Texture *texture;
+  SDL_GameController *controller;
   uint32_t *pixels;
   int width;
   int height;
   int scale;
-  uint8_t buttons_mask;
+  uint8_t keyboard_buttons_mask;
+  uint8_t controller_buttons_mask;
+  uint8_t hotkeys_mask;
+  SDL_JoystickID controller_instance_id;
   mrb_bool quit_requested;
 } gb_sdl2_host;
 
@@ -50,6 +60,11 @@ gb_sdl2_host_cleanup(gb_sdl2_host *host)
   if (host->texture != NULL) {
     SDL_DestroyTexture(host->texture);
     host->texture = NULL;
+  }
+
+  if (host->controller != NULL) {
+    SDL_GameControllerClose(host->controller);
+    host->controller = NULL;
   }
 
   if (host->renderer != NULL) {
@@ -116,6 +131,62 @@ gb_button_from_key(SDL_Keycode key)
   }
 }
 
+static uint8_t
+gb_hotkey_from_key(SDL_Keycode key)
+{
+  switch (key) {
+    case SDLK_p: return GB_HOTKEY_PAUSE;
+    case SDLK_r: return GB_HOTKEY_RESET;
+    case SDLK_f: return GB_HOTKEY_SPEED;
+    default: return 0;
+  }
+}
+
+static uint8_t
+gb_button_from_controller(SDL_GameControllerButton button)
+{
+  switch (button) {
+    case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: return GB_BUTTON_RIGHT;
+    case SDL_CONTROLLER_BUTTON_DPAD_LEFT: return GB_BUTTON_LEFT;
+    case SDL_CONTROLLER_BUTTON_DPAD_UP: return GB_BUTTON_UP;
+    case SDL_CONTROLLER_BUTTON_DPAD_DOWN: return GB_BUTTON_DOWN;
+    case SDL_CONTROLLER_BUTTON_A: return GB_BUTTON_A;
+    case SDL_CONTROLLER_BUTTON_B: return GB_BUTTON_B;
+    case SDL_CONTROLLER_BUTTON_BACK: return GB_BUTTON_SELECT;
+    case SDL_CONTROLLER_BUTTON_START: return GB_BUTTON_START;
+    default: return 0;
+  }
+}
+
+static void
+gb_sdl2_host_open_first_controller(gb_sdl2_host *host)
+{
+  int index;
+  int total;
+
+  if (host->controller != NULL) {
+    return;
+  }
+
+  total = SDL_NumJoysticks();
+  for (index = 0; index < total; index++) {
+    SDL_Joystick *joystick;
+
+    if (!SDL_IsGameController(index)) {
+      continue;
+    }
+
+    host->controller = SDL_GameControllerOpen(index);
+    if (host->controller == NULL) {
+      continue;
+    }
+
+    joystick = SDL_GameControllerGetJoystick(host->controller);
+    host->controller_instance_id = SDL_JoystickInstanceID(joystick);
+    return;
+  }
+}
+
 static mrb_value
 gb_sdl2_host_initialize(mrb_state *mrb, mrb_value self)
 {
@@ -139,10 +210,14 @@ gb_sdl2_host_initialize(mrb_state *mrb, mrb_value self)
   host->height = (int)height;
   host->scale = (int)scale;
 
-  if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) {
+  host->controller_instance_id = -1;
+
+  if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_GAMECONTROLLER) != 0) {
     mrb_free(mrb, host);
     mrb_raise(mrb, E_RUNTIME_ERROR, SDL_GetError());
   }
+
+  gb_sdl2_host_open_first_controller(host);
 
   host->window = SDL_CreateWindow(
     title,
@@ -203,18 +278,62 @@ gb_sdl2_host_poll(mrb_state *mrb, mrb_value self)
       case SDL_KEYUP:
       {
         uint8_t bit = gb_button_from_key(event.key.keysym.sym);
+        uint8_t hotkey = 0;
+        mrb_bool repeated = event.type == SDL_KEYDOWN && event.key.repeat != 0;
 
-        if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE) {
+        if (!repeated && event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE) {
           host->quit_requested = TRUE;
+        }
+
+        if (!repeated && event.type == SDL_KEYDOWN) {
+          hotkey = gb_hotkey_from_key(event.key.keysym.sym);
+          host->hotkeys_mask |= hotkey;
         }
 
         if (bit != 0) {
           if (event.type == SDL_KEYDOWN) {
-            host->buttons_mask |= bit;
+            host->keyboard_buttons_mask |= bit;
           }
           else {
-            host->buttons_mask &= (uint8_t)~bit;
+            host->keyboard_buttons_mask &= (uint8_t)~bit;
           }
+        }
+        break;
+      }
+
+      case SDL_CONTROLLERDEVICEADDED:
+        gb_sdl2_host_open_first_controller(host);
+        break;
+
+      case SDL_CONTROLLERDEVICEREMOVED:
+        if (host->controller != NULL && event.cdevice.which == host->controller_instance_id) {
+          SDL_GameControllerClose(host->controller);
+          host->controller = NULL;
+          host->controller_buttons_mask = 0;
+          host->controller_instance_id = -1;
+          gb_sdl2_host_open_first_controller(host);
+        }
+        break;
+
+      case SDL_CONTROLLERBUTTONDOWN:
+      case SDL_CONTROLLERBUTTONUP:
+      {
+        uint8_t bit;
+
+        if (host->controller == NULL || event.cbutton.which != host->controller_instance_id) {
+          break;
+        }
+
+        bit = gb_button_from_controller((SDL_GameControllerButton)event.cbutton.button);
+        if (bit == 0) {
+          break;
+        }
+
+        if (event.type == SDL_CONTROLLERBUTTONDOWN) {
+          host->controller_buttons_mask |= bit;
+        }
+        else {
+          host->controller_buttons_mask &= (uint8_t)~bit;
         }
         break;
       }
@@ -224,7 +343,16 @@ gb_sdl2_host_poll(mrb_state *mrb, mrb_value self)
     }
   }
 
-  return mrb_fixnum_value(host->buttons_mask);
+  return mrb_fixnum_value((uint8_t)(host->keyboard_buttons_mask | host->controller_buttons_mask));
+}
+
+static mrb_value
+gb_sdl2_host_hotkeys_mask(mrb_state *mrb, mrb_value self)
+{
+  gb_sdl2_host *host = gb_sdl2_host_get(mrb, self);
+  uint8_t hotkeys = host->hotkeys_mask;
+  host->hotkeys_mask = 0;
+  return mrb_fixnum_value(hotkeys);
 }
 
 static mrb_value
@@ -306,6 +434,7 @@ mrb_mruby_game_boy_sdl2_gem_init(mrb_state *mrb)
 
   mrb_define_method(mrb, host_class, "initialize", gb_sdl2_host_initialize, MRB_ARGS_REQ(4));
   mrb_define_method(mrb, host_class, "poll", gb_sdl2_host_poll, MRB_ARGS_NONE());
+  mrb_define_method(mrb, host_class, "hotkeys_mask", gb_sdl2_host_hotkeys_mask, MRB_ARGS_NONE());
   mrb_define_method(mrb, host_class, "render", gb_sdl2_host_render, MRB_ARGS_REQ(1));
   mrb_define_method(mrb, host_class, "quit_requested?", gb_sdl2_host_quit_requested, MRB_ARGS_NONE());
   mrb_define_method(mrb, host_class, "delay", gb_sdl2_host_delay, MRB_ARGS_REQ(1));
@@ -319,6 +448,9 @@ mrb_mruby_game_boy_sdl2_gem_init(mrb_state *mrb)
   mrb_define_const(mrb, host_class, "BUTTON_B", mrb_fixnum_value(GB_BUTTON_B));
   mrb_define_const(mrb, host_class, "BUTTON_SELECT", mrb_fixnum_value(GB_BUTTON_SELECT));
   mrb_define_const(mrb, host_class, "BUTTON_START", mrb_fixnum_value(GB_BUTTON_START));
+  mrb_define_const(mrb, host_class, "HOTKEY_PAUSE", mrb_fixnum_value(GB_HOTKEY_PAUSE));
+  mrb_define_const(mrb, host_class, "HOTKEY_RESET", mrb_fixnum_value(GB_HOTKEY_RESET));
+  mrb_define_const(mrb, host_class, "HOTKEY_SPEED", mrb_fixnum_value(GB_HOTKEY_SPEED));
 }
 
 void

@@ -8,7 +8,7 @@ pure mruby を優先した、初期段階の DMG(Game Boy) エミュレータ用
 
 - DMG のみ
 - エミュレータコアは pure mruby
-- ブート ROM は未実行で、DMG の post-boot 状態から開始
+- ブート ROM は当面、未ロード・未マップ・未実行で、Core は DMG の post-boot 状態 (`PC=0x0100`, `FF50=1`) を直接適用して開始
 - ローカル開発用のスモーク ROM として TobuTobuGirl を利用
 
 ## 現在の実装状況
@@ -52,7 +52,7 @@ GAME_BOY_ENABLE_SDL2=1 ../mruby/minirake
 ヘッドレス実行:
 
 ```sh
-mruby apps/headless_runner.rb test_roms/tobutobugirl/tobu.gb 32
+mruby apps/headless_runner.rb test_roms/tobu.gb 32
 ```
 
 - 引数1: ROM パス
@@ -61,21 +61,37 @@ mruby apps/headless_runner.rb test_roms/tobutobugirl/tobu.gb 32
 フレームダンプ:
 
 ```sh
-mruby apps/frame_dump.rb test_roms/tobutobugirl/tobu.gb tmp/tobutobugirl/frame.ppm 30 2
+mruby apps/frame_dump.rb test_roms/tobu.gb tmp/tobutobugirl/frame.ppm 30 2
 ```
 
 Linux/X 向けプレビュー:
 
 ```sh
-mruby apps/linux_x_preview.rb test_roms/tobutobugirl/tobu.gb tmp/linux_x_preview 20 10 3
+mruby apps/linux_x_preview.rb test_roms/tobu.gb tmp/linux_x_preview 20 10 3
 feh --reload 0.1 tmp/linux_x_preview/frame_*.ppm
 ```
 
 SDL2 フロントエンド:
 
 ```sh
-mruby apps/sdl2_frontend.rb test_roms/tobutobugirl/tobu.gb 4 mruby_game_boy
+mruby apps/sdl2_frontend.rb test_roms/tobu.gb 4 mruby_game_boy
 ```
+
+ROM パスを省略した場合は `test_roms/**/*.gb` を走査し、1 本なら自動選択、複数ならターミナルで番号選択します。
+
+SDL2 フロントエンドのホットキー:
+
+- `P`: pause / resume
+- `R`: ROM から Core を作り直して reset
+- `F`: 1x / 2x 倍速切替
+- `Esc`: 終了
+
+`SDL_GameController` の基本対応:
+
+- D-pad
+- `A` / `B`
+- `Back` = Select
+- `Start` = Start
 
 ROM 本体はリポジトリに含めていません。必要な ROM は `test_roms/...` にローカル配置してください。
 
@@ -105,7 +121,7 @@ bash docker/build_mruby.sh
 ヘッドレス実行:
 
 ```sh
-bash docker/run_headless.sh test_roms/tobutobugirl/tobu.gb 32
+bash docker/run_headless.sh test_roms/tobu.gb 32
 ```
 
 Linux/X 上で SDL2 実行:
@@ -114,5 +130,5 @@ Linux/X 上で SDL2 実行:
 xhost +local:docker
 export DISPLAY=${DISPLAY:-:0}
 export XAUTHORITY=${XAUTHORITY:-$HOME/.Xauthority}
-bash docker/run_sdl2.sh test_roms/tobutobugirl/tobu.gb 4 mruby_game_boy
+bash docker/run_sdl2.sh test_roms/tobu.gb 4 mruby_game_boy
 ```

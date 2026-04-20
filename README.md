@@ -8,7 +8,7 @@ Pure mruby first Game Boy emulator workspace.
 
 - DMG only
 - pure mruby only
-- boot ROM skipped for now; starts from DMG post-boot state
+- boot ROM is currently not loaded, mapped, or executed; core starts from direct DMG post-boot state (`PC=0x0100`, `FF50=1`)
 - headless core first
 - TobuTobuGirl ROM used as the default smoke ROM
 
@@ -52,7 +52,7 @@ GAME_BOY_ENABLE_SDL2=1 ../mruby/minirake
 Run the headless runner:
 
 ```sh
-mruby apps/headless_runner.rb test_roms/tobutobugirl/tobu.gb 32
+mruby apps/headless_runner.rb test_roms/tobu.gb 32
 ```
 
 - arg1: ROM path
@@ -61,21 +61,37 @@ mruby apps/headless_runner.rb test_roms/tobutobugirl/tobu.gb 32
 Dump a frame as PPM:
 
 ```sh
-mruby apps/frame_dump.rb test_roms/tobutobugirl/tobu.gb tmp/tobutobugirl/frame.ppm 30 2
+mruby apps/frame_dump.rb test_roms/tobu.gb tmp/tobutobugirl/frame.ppm 30 2
 ```
 
 Linux/X preview flow:
 
 ```sh
-mruby apps/linux_x_preview.rb test_roms/tobutobugirl/tobu.gb tmp/linux_x_preview 20 10 3
+mruby apps/linux_x_preview.rb test_roms/tobu.gb tmp/linux_x_preview 20 10 3
 feh --reload 0.1 tmp/linux_x_preview/frame_*.ppm
 ```
 
 Run the SDL2 frontend:
 
 ```sh
-mruby apps/sdl2_frontend.rb test_roms/tobutobugirl/tobu.gb 4 mruby_game_boy
+mruby apps/sdl2_frontend.rb test_roms/tobu.gb 4 mruby_game_boy
 ```
+
+If you omit the ROM path, the frontend will scan `test_roms/**/*.gb`, auto-pick a single match, or let you choose by number in the terminal.
+
+SDL2 frontend hotkeys:
+
+- `P`: pause / resume
+- `R`: reset by recreating the core from the ROM
+- `F`: toggle 1x / 2x speed
+- `Esc`: quit
+
+Supported pads via `SDL_GameController`:
+
+- D-pad
+- `A` / `B`
+- `Back` = Select
+- `Start` = Start
 
 If you built inside Docker, the mruby binary is typically here:
 
@@ -83,7 +99,7 @@ If you built inside Docker, the mruby binary is typically here:
 /opt/mruby/bin/mruby
 ```
 
-ROM files are not included in the public repository. Place your local ROMs under `test_roms/...` such as `test_roms/tobutobugirl/tobu.gb`.
+ROM files are not included in the public repository. Place your local ROMs under `test_roms/...` such as `test_roms/tobu.gb`.
 
 PPM is used because it keeps the emulator core pure mruby and can still be viewed easily on Linux/X.
 
@@ -94,6 +110,12 @@ Run the mruby test suite from your local mruby checkout:
 ```sh
 ../mruby/minirake test
 ```
+
+## Remaining work
+
+- MBC variants beyond the current ROM Only / basic MBC1 support
+- battery-backed save persistence wiring in frontend / app flows
+- more ROM-driven compatibility and timing regression coverage
 
 ## Docker build/run (recommended)
 
@@ -106,7 +128,7 @@ bash docker/build_mruby.sh
 Run the headless smoke script inside Docker:
 
 ```sh
-bash docker/run_headless.sh test_roms/tobutobugirl/tobu.gb 32
+bash docker/run_headless.sh test_roms/tobu.gb 32
 ```
 
 Run the SDL2 frontend on Linux/X from Docker:
@@ -115,7 +137,7 @@ Run the SDL2 frontend on Linux/X from Docker:
 xhost +local:docker
 export DISPLAY=${DISPLAY:-:0}
 export XAUTHORITY=${XAUTHORITY:-$HOME/.Xauthority}
-bash docker/run_sdl2.sh test_roms/tobutobugirl/tobu.gb 4 mruby_game_boy
+bash docker/run_sdl2.sh test_roms/tobu.gb 4 mruby_game_boy
 ```
 
 Run the mruby test suite inside Docker:
@@ -137,5 +159,5 @@ It is also smoke-testable without a real X server:
 
 ```sh
 docker compose run --rm mruby-dev \
-  bash -lc 'cd /opt/mruby && SDL_VIDEODRIVER=dummy timeout 5 ./bin/mruby /workspace/apps/sdl2_frontend.rb /workspace/test_roms/tobutobugirl/tobu.gb 1'
+  bash -lc 'cd /opt/mruby && SDL_VIDEODRIVER=dummy timeout 5 ./bin/mruby /workspace/apps/sdl2_frontend.rb /workspace/test_roms/tobu.gb 1'
 ```
