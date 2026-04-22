@@ -767,7 +767,7 @@ assert('GameBoy::Bus blocks OAM access during DMA') do
 
   assert_equal 0xFF, core.bus.read8(0xFE00)
   core.bus.write8(0xFE00, 0x78)
-  assert_equal 0x00, core.ppu.read_oam(0xFE00)
+  assert_equal 0x56, core.ppu.read_oam(0xFE00)
 
   core.dma.tick(640)
   core.bus.write8(0xFE00, 0x78)

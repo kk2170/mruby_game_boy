@@ -77,8 +77,8 @@ module GameBoy
     def advance_one_dot
       old_timer_input = timer_input_high?
       @system_counter = (@system_counter + 1) & 0xFFFF
-      detect_timer_falling_edge(old_timer_input, timer_input_high?)
-      advance_reload_delay
+      started_reload = detect_timer_falling_edge(old_timer_input, timer_input_high?)
+      advance_reload_delay unless started_reload
     end
 
     def write_div
@@ -94,7 +94,9 @@ module GameBoy
     end
 
     def detect_timer_falling_edge(old_input, new_input)
-      timer_tick if old_input && !new_input
+      return false unless old_input && !new_input
+
+      timer_tick
     end
 
     def timer_input_high?
@@ -116,15 +118,17 @@ module GameBoy
     end
 
     def timer_tick
-      return if @reload_delay_dots > 0
+      return false if @reload_delay_dots > 0
 
       if @tima == 0xFF
         # 実機では overflow 直後の 1 M-cycle は TIMA=00 のままで、
         # その後に TMA がロードされて Timer interrupt が立つ。
         @tima = 0x00
         @reload_delay_dots = OVERFLOW_RELOAD_DELAY_DOTS
+        true
       else
         @tima = (@tima + 1) & 0xFF
+        false
       end
     end
 
