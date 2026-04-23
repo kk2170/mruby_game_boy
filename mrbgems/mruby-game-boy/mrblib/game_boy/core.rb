@@ -38,6 +38,18 @@ module GameBoy
       @cartridge.header
     end
 
+    def battery_backed?
+      @cartridge.battery_backed?
+    end
+
+    def dump_battery_ram
+      @cartridge.dump_battery_ram
+    end
+
+    def load_battery_ram(bytes)
+      @cartridge.load_battery_ram(bytes)
+    end
+
     def step
       falling_edge = @joypad.consume_falling_edge?
       @cpu.wake_stop if @joypad.wake_condition_met? || falling_edge

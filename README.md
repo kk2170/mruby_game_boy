@@ -16,7 +16,8 @@ Pure mruby first Game Boy emulator workspace.
 
 - CPU execution is still partial, but boot-state startup, interrupt entry, JR, conditional CALL, HALT bug, and STOP stop/wake behavior are covered by regression tests
 - PPU includes scanline timing, VBlank, a 160x144 framebuffer, BG/Window/OBJ rendering, DMG sprite priority rules, and VRAM/OAM access restrictions
-- Cartridge support includes ROM Only and basic MBC1
+- Cartridge support includes ROM Only, basic MBC1, and basic MBC2
+- Battery-backed cartridges persist app/frontend saves as `"<rom_path>.sav"`
 - APU currently models register state and wave RAM, including NR52 power/status handling, but does not produce audio yet
 - Serial covers boot-state registers, internal clock transfer completion, interrupt request timing, and the external-clock no-progress case
 - Targeted tests live in `mrbgems/mruby-game-boy/test/core_test.rb` for CPU, STOP, APU, Serial, PPU, DMA, and Joypad behavior
@@ -101,6 +102,8 @@ If you built inside Docker, the mruby binary is typically here:
 
 ROM files are not included in the public repository. Place your local ROMs under `test_roms/...` such as `test_roms/tobu.gb`.
 
+Battery-backed cartridges use `"<rom_path>.sav"`; `apps/headless_runner.rb`, `apps/frame_dump.rb`, `apps/linux_x_preview.rb`, and `apps/sdl2_frontend.rb` will load that file on startup and save it again on exit/reset.
+
 PPM is used because it keeps the emulator core pure mruby and can still be viewed easily on Linux/X.
 
 ## Test
@@ -113,9 +116,14 @@ Run the mruby test suite from your local mruby checkout:
 
 ## Remaining work
 
-- MBC variants beyond the current ROM Only / basic MBC1 support
-- battery-backed save persistence wiring in frontend / app flows
-- more ROM-driven compatibility and timing regression coverage
+### Tomorrow checklist (roughly the last 6%)
+
+- add ROM-driven regression coverage for the newly added cartridge/save path and at least one more timing-sensitive behavior
+
+### After that
+
+- MBC variants beyond the current ROM Only / basic MBC1 / basic MBC2 support
+- broader ROM-driven compatibility and timing regression coverage
 
 ## Docker build/run (recommended)
 

@@ -4,11 +4,13 @@ rescue NameError
   load File.expand_path('support/load_game_boy.rb', File.dirname(__FILE__))
 end
 
+battery_save_support_path = File.expand_path('support/battery_save.rb', File.dirname(__FILE__))
+eval(File.open(battery_save_support_path, 'rb') { |file| file.read }, binding, battery_save_support_path)
+
 rom_path = ARGV[0] || 'test_roms/tobutobugirl/tobu.gb'
 step_count = (ARGV[1] || '0').to_i
 
-rom_data = File.open(rom_path, 'rb') { |file| file.read }
-gb = GameBoy::Core.new(rom_data)
+gb, save_path = load_core_with_battery_save(rom_path)
 header = gb.header
 
 puts '== ROM =='
@@ -22,10 +24,10 @@ puts "entry_point: #{header[:entry_point].map { |byte| format('%02X', byte) }.jo
 puts '== BOOT STATE =='
 puts gb.cpu.register_dump
 
-if step_count > 0
-  executed = 0
+executed = 0
 
-  begin
+begin
+  if step_count > 0
     while executed < step_count
       gb.step
       executed += 1
@@ -34,11 +36,13 @@ if step_count > 0
     puts '== EXECUTION =='
     puts "executed_steps: #{executed}"
     puts gb.cpu.register_dump
-  rescue GameBoy::UnsupportedOpcodeError => e
-    puts '== EXECUTION STOPPED =='
-    puts e.message
-    puts "executed_steps: #{executed}"
-    puts gb.cpu.register_dump
-    exit 2
   end
+rescue GameBoy::UnsupportedOpcodeError => e
+  puts '== EXECUTION STOPPED =='
+  puts e.message
+  puts "executed_steps: #{executed}"
+  puts gb.cpu.register_dump
+  exit 2
+ensure
+  persist_core_battery_save(gb, save_path)
 end

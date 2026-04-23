@@ -27,7 +27,9 @@ module GameBoy
       0x00 => 'ROM ONLY',
       0x01 => 'MBC1',
       0x02 => 'MBC1+RAM',
-      0x03 => 'MBC1+RAM+BATTERY'
+      0x03 => 'MBC1+RAM+BATTERY',
+      0x05 => 'MBC2',
+      0x06 => 'MBC2+BATTERY'
     }
 
     def self.build(source)
@@ -39,6 +41,8 @@ module GameBoy
         RomOnly.new(rom_bytes)
       when 0x01, 0x02, 0x03
         MBC1.new(rom_bytes)
+      when 0x05, 0x06
+        MBC2.new(rom_bytes)
       else
         raise UnsupportedCartridgeError, format('unsupported cartridge type 0x%02X', cartridge_type)
       end

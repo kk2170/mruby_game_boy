@@ -60,6 +60,17 @@ def build_test_mbc1_rom(cartridge_type: 0x03, rom_size_code: 0x03, ram_size_code
   )
 end
 
+def build_test_mbc2_rom(cartridge_type: 0x06, rom_size_code: 0x03, bytes: {})
+  build_test_rom(
+    GameBoy::Cartridge::ROM_SIZE_BYTES[rom_size_code],
+    {
+      0x0147 => cartridge_type,
+      0x0148 => rom_size_code,
+      0x0149 => 0x00
+    }.merge(bytes)
+  )
+end
+
 def build_test_timer
   interrupts = GameBoy::Interrupts.new
   [GameBoy::Timer.new(interrupts), interrupts]
@@ -556,6 +567,132 @@ assert('GameBoy::Cartridge::MBC1 battery RAM dump/load roundtrips for type 0x03'
 
   assert_equal 0x12, restored.read8(0xA000)
   assert_equal 0x34, restored.read8(0xA001)
+end
+
+assert('GameBoy::Core#reset resets MBC2 bank state without clearing internal RAM') do
+  rom = build_test_mbc2_rom(bytes: {
+    0x4000 => 0x11,
+    0x8000 => 0x22
+  })
+  core = GameBoy::Core.new(rom)
+
+  core.bus.write8(0x0000, 0x0A)
+  core.bus.write8(0x2100, 0x02)
+  core.bus.write8(0xA000, 0x5A)
+
+  assert_equal 0x22, core.bus.read8(0x4000)
+  assert_equal 0xFA, core.bus.read8(0xA000)
+
+  core.reset
+
+  assert_equal 0x11, core.bus.read8(0x4000)
+  assert_equal 0xFF, core.bus.read8(0xA000)
+
+  core.bus.write8(0x0000, 0x0A)
+
+  assert_equal 0xFA, core.bus.read8(0xA000)
+end
+
+assert('GameBoy::Core battery RAM roundtrips through binary string data') do
+  core = GameBoy::Core.new(build_test_mbc2_rom)
+
+  core.bus.write8(0x0000, 0x0A)
+  core.bus.write8(0xA000, 0x12)
+  core.bus.write8(0xA001, 0x34)
+
+  dump = core.dump_battery_ram
+  binary_dump = "\x00" * dump.length
+  index = 0
+
+  while index < dump.length
+    binary_dump.setbyte(index, dump[index] & 0xFF)
+    index += 1
+  end
+
+  restored = GameBoy::Core.new(build_test_mbc2_rom)
+  restored.load_battery_ram(binary_dump)
+  restored.bus.write8(0x0000, 0x0A)
+
+  assert_equal 0xF2, restored.bus.read8(0xA000)
+  assert_equal 0xF4, restored.bus.read8(0xA001)
+end
+
+assert('GameBoy::Cartridge builds basic MBC2 cartridges') do
+  rom = build_test_mbc2_rom(
+    cartridge_type: 0x05,
+    bytes: {
+      0x4000 => 0x11,
+      0x8000 => 0x22
+    }
+  )
+
+  cart = GameBoy::Cartridge.build(rom)
+
+  assert_equal 'GameBoy::Cartridge::MBC2', cart.class.to_s
+  assert_equal 'MBC2', cart.header[:cartridge_type_name]
+  assert_equal 0x11, cart.read8(0x4000)
+
+  cart.write8(0x2100, 0x02)
+  assert_equal 0x22, cart.read8(0x4000)
+
+  cart.write8(0x2100, 0x00)
+  assert_equal 0x11, cart.read8(0x4000)
+end
+
+assert('GameBoy::Cartridge::MBC2 uses address bit 8 to split RAM enable and ROM banking') do
+  rom = build_test_mbc2_rom(bytes: {
+    0x4000 => 0x11,
+    0x28000 => 0xAA
+  })
+  cart = GameBoy::Cartridge.build(rom)
+
+  cart.write8(0x0000, 0x0A)
+  cart.write8(0xA000, 0x3C)
+
+  assert_equal 0xFC, cart.read8(0xA000)
+
+  cart.write8(0x0100, 0x0A)
+
+  assert_equal 0xAA, cart.read8(0x4000)
+  assert_equal 0xFC, cart.read8(0xA000)
+
+  cart.write8(0x0000, 0x00)
+
+  assert_equal 0xFF, cart.read8(0xA000)
+end
+
+assert('GameBoy::Cartridge::MBC2 battery RAM dump/load roundtrips for type 0x06') do
+  rom = build_test_mbc2_rom
+  cart = GameBoy::Cartridge.build(rom)
+
+  assert_true cart.battery_backed?
+
+  cart.write8(0x0000, 0x0A)
+  cart.write8(0xA000, 0x12)
+  cart.write8(0xA123, 0x3F)
+
+  dump = cart.dump_battery_ram
+  restored = GameBoy::Cartridge.build(rom)
+
+  restored.load_battery_ram(dump)
+  restored.write8(0x0000, 0x0A)
+
+  assert_equal 0xF2, restored.read8(0xA000)
+  assert_equal 0xFF, restored.read8(0xA123)
+end
+
+assert('GameBoy::Core delegates battery-backed cartridge APIs') do
+  core = GameBoy::Core.new(build_test_mbc1_rom)
+
+  assert_true core.battery_backed?
+
+  core.load_battery_ram([0x12, 0x34])
+  core.bus.write8(0x0000, 0x0A)
+
+  assert_equal 0x12, core.bus.read8(0xA000)
+  assert_equal 0x34, core.bus.read8(0xA001)
+  assert_equal 0x12, core.dump_battery_ram[0]
+  assert_equal 0x34, core.dump_battery_ram[1]
 end
 
 assert('GameBoy::Cartridge::RomOnly battery API stays inert') do

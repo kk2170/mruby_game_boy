@@ -4,6 +4,9 @@ rescue NameError
   load File.expand_path('support/load_game_boy.rb', File.dirname(__FILE__))
 end
 
+battery_save_support_path = File.expand_path('support/battery_save.rb', File.dirname(__FILE__))
+eval(File.open(battery_save_support_path, 'rb') { |file| file.read }, binding, battery_save_support_path)
+
 begin
   GameBoy::SDL2Host
 rescue NameError
@@ -84,8 +87,7 @@ def select_rom_path(argv_path)
 end
 
 def build_core(rom_path)
-  rom_data = File.open(rom_path, 'rb') { |file| file.read }
-  [rom_data, GameBoy::Core.new(rom_data)]
+  load_core_with_battery_save(rom_path)
 end
 
 def apply_hotkeys(host, hotkeys_mask, speed_multiplier)
@@ -109,7 +111,7 @@ scale = (ARGV[1] || '4').to_i
 scale = 1 if scale < 1
 title = ARGV[2] || 'mruby_game_boy'
 
-_, gb = build_core(rom_path)
+gb, save_path = build_core(rom_path)
 host = GameBoy::SDL2Host.new(title, GameBoy::Constants::SCREEN_WIDTH, GameBoy::Constants::SCREEN_HEIGHT, scale)
 
 def sync_buttons(gb, previous_mask, current_mask)
@@ -141,7 +143,8 @@ begin
     end
 
     if reset_requested
-      _, gb = build_core(rom_path)
+      persist_core_battery_save(gb, save_path)
+      gb, save_path = build_core(rom_path)
       previous_mask = 0
       puts 'reset'
     end
@@ -159,5 +162,6 @@ begin
     host.delay(1)
   end
 ensure
+  persist_core_battery_save(gb, save_path) if gb
   host.close if host
 end
