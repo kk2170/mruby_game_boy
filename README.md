@@ -118,7 +118,7 @@ Run the mruby test suite from your local mruby checkout:
 
 ### Tomorrow checklist (roughly the last 6%)
 
-- add ROM-driven regression coverage for the newly added cartridge/save path and at least one more timing-sensitive behavior
+- add at least one more timing-sensitive ROM-driven regression
 
 ### After that
 
@@ -154,6 +154,14 @@ Run the mruby test suite inside Docker:
 docker compose run --rm mruby-dev \
   bash -lc 'cd /opt/mruby && GAME_BOY_ENABLE_SDL2=1 MRUBY_CONFIG=/workspace/build_config.rb ./minirake test'
 ```
+
+Run the battery-save smoke regression inside Docker:
+
+```sh
+bash docker/verify_battery_save.sh test_roms/tobutobugirl/tobu.gb
+```
+
+The script copies the ROM under `tmp/verify_battery_save/` so it can create and reload `"<rom_path>.sav"` without touching a save next to your original ROM.
 
 The Docker setup clones `mruby` into a named Docker volume on first run and keeps the emulator core repository mounted from the host.
 `docker/run_sdl2.sh` will also mount `/tmp/.X11-unix` and `.Xauthority` when available.

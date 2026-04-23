@@ -168,6 +168,7 @@ The current verification path is:
 
 - headless runner under mruby in Docker
 - frame dump under mruby in Docker
+- battery-save smoke regression via `docker/verify_battery_save.sh`
 - SDL2 frontend under mruby with `SDL_VIDEODRIVER=dummy`
 - optional real X11 execution via `docker/run_sdl2.sh`
 - regression coverage in `mrbgems/mruby-game-boy/test/core_test.rb` for:

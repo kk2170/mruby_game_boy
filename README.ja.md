@@ -113,6 +113,14 @@ docker compose run --rm mruby-dev \
   bash -lc 'cd /opt/mruby && GAME_BOY_ENABLE_SDL2=1 MRUBY_CONFIG=/workspace/build_config.rb ./minirake test'
 ```
 
+Docker でバッテリセーブのスモーク回帰を実行:
+
+```sh
+bash docker/verify_battery_save.sh test_roms/tobutobugirl/tobu.gb
+```
+
+このスクリプトは ROM を `tmp/verify_battery_save/` 配下へコピーしてから `"<rom_path>.sav"` を作成/再読込するので、元の ROM の隣にある save を直接触りません。
+
 ## Docker build/run
 
 mruby と SDL2 環境を Docker で用意する場合:
