@@ -87,6 +87,18 @@ def build_test_timer
   [GameBoy::Timer.new(interrupts), interrupts]
 end
 
+def build_cpu_test_core(opcodes, bytes = {})
+  rom_bytes = { 0x0147 => 0x00 }
+  index = 0
+
+  while index < opcodes.length
+    rom_bytes[0x0100 + index] = opcodes[index]
+    index += 1
+  end
+
+  GameBoy::Core.new(build_test_rom(0x8000, rom_bytes.merge(bytes)))
+end
+
 assert('GameBoy::Cartridge parses Tobu-style header fields') do
   rom = Array.new(0x8000, 0)
   title = 'TOBU'
@@ -913,6 +925,213 @@ assert('GameBoy::CPU JR uses post-immediate PC as base') do
   core.step
 
   assert_equal 0x0104, core.cpu.pc
+end
+
+assert('GameBoy::CPU executes representative load opcodes across registers memory and FF00 space') do
+  core = build_cpu_test_core([
+    0x21, 0x00, 0xC1,
+    0x36, 0x5A,
+    0x46,
+    0x78,
+    0xE0, 0x01,
+    0x3E, 0x00,
+    0xF0, 0x01,
+    0x0E, 0x01,
+    0x3E, 0x66,
+    0xE2,
+    0x3E, 0x00,
+    0xF2,
+    0xEA, 0x01, 0xC1,
+    0x3E, 0x00,
+    0xFA, 0x01, 0xC1
+  ])
+
+  assert_equal 12, core.step
+  assert_equal 0xC100, core.cpu.hl
+
+  assert_equal 12, core.step
+  assert_equal 0x5A, core.bus.read8(0xC100)
+
+  assert_equal 8, core.step
+  assert_equal 0x5A, core.cpu.b
+
+  assert_equal 4, core.step
+  assert_equal 0x5A, core.cpu.a
+
+  assert_equal 12, core.step
+  assert_equal 0x5A, core.bus.read8(0xFF01)
+
+  assert_equal 8, core.step
+  assert_equal 0x00, core.cpu.a
+
+  assert_equal 12, core.step
+  assert_equal 0x5A, core.cpu.a
+
+  assert_equal 8, core.step
+  assert_equal 0x01, core.cpu.c
+
+  assert_equal 8, core.step
+  assert_equal 0x66, core.cpu.a
+
+  assert_equal 8, core.step
+  assert_equal 0x66, core.bus.read8(0xFF01)
+
+  assert_equal 8, core.step
+  assert_equal 0x00, core.cpu.a
+
+  assert_equal 8, core.step
+  assert_equal 0x66, core.cpu.a
+
+  assert_equal 16, core.step
+  assert_equal 0x66, core.bus.read8(0xC101)
+
+  assert_equal 8, core.step
+  assert_equal 0x00, core.cpu.a
+
+  assert_equal 16, core.step
+  assert_equal 0x66, core.cpu.a
+end
+
+assert('GameBoy::CPU executes representative immediate ALU opcodes and flags') do
+  cases = [
+    [[0xC6, 0x01], 0x0F00, 0x10, 0x20],
+    [[0xCE, 0x70], 0x8F10, 0x00, 0xB0],
+    [[0xD6, 0x01], 0x1000, 0x0F, 0x60],
+    [[0xDE, 0x0F], 0x1010, 0x00, 0xE0],
+    [[0xE6, 0x0F], 0xF000, 0x00, 0xA0],
+    [[0xEE, 0xFF], 0xFF00, 0x00, 0x80],
+    [[0xF6, 0x01], 0x0000, 0x01, 0x00],
+    [[0xFE, 0x42], 0x4200, 0x42, 0xC0]
+  ]
+
+  cases.each do |opcodes, af, expected_a, expected_f|
+    core = build_cpu_test_core(opcodes)
+    core.cpu.af = af
+
+    assert_equal 8, core.step
+    assert_equal expected_a, core.cpu.a
+    assert_equal expected_f, core.cpu.f
+  end
+end
+
+assert('GameBoy::CPU executes representative CB register operations') do
+  core = build_cpu_test_core([0xCB, 0x11, 0xCB, 0x7C, 0xCB, 0xC0, 0xCB, 0x80])
+  core.cpu.af = 0x0010
+  core.cpu.bc = 0x0080
+  core.cpu.hl = 0x0000
+
+  assert_equal 8, core.step
+  assert_equal 0x01, core.cpu.c
+  assert_equal 0x10, core.cpu.f
+
+  assert_equal 8, core.step
+  assert_equal 0xB0, core.cpu.f
+
+  assert_equal 8, core.step
+  assert_equal 0x01, core.cpu.b
+
+  assert_equal 8, core.step
+  assert_equal 0x00, core.cpu.b
+end
+
+assert('GameBoy::CPU executes representative CB memory operations') do
+  core = build_cpu_test_core([0x21, 0x00, 0xC1, 0x36, 0x81, 0xCB, 0x3E])
+
+  assert_equal 12, core.step
+  assert_equal 12, core.step
+
+  cycles = core.step
+
+  assert_equal 16, cycles
+  assert_equal 0x40, core.bus.read8(0xC100)
+  assert_equal 0x10, core.cpu.f
+end
+
+assert('GameBoy::CPU executes representative 16-bit and SP arithmetic opcodes') do
+  core = build_cpu_test_core([0x09])
+  core.cpu.af = 0x0000
+  core.cpu.hl = 0x0FFF
+  core.cpu.bc = 0x0001
+
+  assert_equal 8, core.step
+  assert_equal 0x1000, core.cpu.hl
+  assert_equal 0x20, core.cpu.f
+
+  core = build_cpu_test_core([0xE8, 0x08])
+  core.cpu.load_boot_state(af: 0x0000, bc: core.cpu.bc, de: core.cpu.de, hl: core.cpu.hl, sp: 0xFFF8, pc: 0x0100, ime: false)
+
+  assert_equal 16, core.step
+  assert_equal 0x0000, core.cpu.sp
+  assert_equal 0x30, core.cpu.f
+
+  core = build_cpu_test_core([0xF8, 0x08, 0xF9])
+  core.cpu.load_boot_state(af: 0x0000, bc: core.cpu.bc, de: core.cpu.de, hl: core.cpu.hl, sp: 0xFFF8, pc: 0x0100, ime: false)
+
+  assert_equal 12, core.step
+  assert_equal 0x0000, core.cpu.hl
+  assert_equal 0x30, core.cpu.f
+
+  assert_equal 8, core.step
+  assert_equal 0x0000, core.cpu.sp
+end
+
+assert('GameBoy::CPU executes representative stack transfer opcodes') do
+  core = build_cpu_test_core([0xC5, 0xD1])
+  core.cpu.bc = 0x1234
+
+  assert_equal 16, core.step
+  assert_equal 0x34, core.bus.read8(0xFFFC)
+  assert_equal 0x12, core.bus.read8(0xFFFD)
+
+  assert_equal 12, core.step
+  assert_equal 0x1234, core.cpu.de
+  assert_equal 0xFFFE, core.cpu.sp
+
+  core = build_cpu_test_core([0xF1])
+  core.cpu.load_boot_state(af: core.cpu.af, bc: core.cpu.bc, de: core.cpu.de, hl: core.cpu.hl, sp: 0xC000, pc: 0x0100, ime: false)
+  core.bus.write8(0xC000, 0x3F)
+  core.bus.write8(0xC001, 0x12)
+
+  assert_equal 12, core.step
+  assert_equal 0x1230, core.cpu.af
+  assert_equal 0xC002, core.cpu.sp
+end
+
+assert('GameBoy::CPU executes representative return and restart opcodes') do
+  core = build_cpu_test_core([0xC9])
+  core.cpu.load_boot_state(af: core.cpu.af, bc: core.cpu.bc, de: core.cpu.de, hl: core.cpu.hl, sp: 0xC000, pc: 0x0100, ime: false)
+  core.bus.write8(0xC000, 0x34)
+  core.bus.write8(0xC001, 0x12)
+
+  assert_equal 16, core.step
+  assert_equal 0x1234, core.cpu.pc
+  assert_equal 0xC002, core.cpu.sp
+
+  core = build_cpu_test_core([0xD9])
+  core.cpu.load_boot_state(af: core.cpu.af, bc: core.cpu.bc, de: core.cpu.de, hl: core.cpu.hl, sp: 0xC000, pc: 0x0100, ime: false)
+  core.bus.write8(0xC000, 0x34)
+  core.bus.write8(0xC001, 0x12)
+  core.interrupts.write_ie(0x04)
+  core.interrupts.write_if(0xE0)
+  core.interrupts.request(GameBoy::Constants::INT_TIMER)
+
+  assert_equal 16, core.step
+  assert_equal 0x1234, core.cpu.pc
+  assert_equal 0xC002, core.cpu.sp
+
+  assert_equal 20, core.step
+  assert_equal 0x0050, core.cpu.pc
+  assert_equal 0xC000, core.cpu.sp
+  assert_equal 0x34, core.bus.read8(0xC000)
+  assert_equal 0x12, core.bus.read8(0xC001)
+
+  core = build_cpu_test_core([0xC7])
+
+  assert_equal 16, core.step
+  assert_equal 0x0000, core.cpu.pc
+  assert_equal 0xFFFC, core.cpu.sp
+  assert_equal 0x01, core.bus.read8(0xFFFC)
+  assert_equal 0x01, core.bus.read8(0xFFFD)
 end
 
 assert('GameBoy::Bus routes FF46 writes to DMA over time') do
