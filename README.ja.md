@@ -15,7 +15,7 @@ pure mruby を優先した、初期段階の DMG(Game Boy) エミュレータ用
 
 - CPU: まだ部分実装ですが、起動直後の実行、割り込み突入、JR、条件付き CALL、HALT bug、STOP の停止/復帰を回帰テストで確認済み
 - PPU: 160x144 フレームバッファ、走査線タイミング、VBlank、BG/Window/OBJ 描画、DMG スプライト優先順位、VRAM/OAM 制限を実装
-- Cartridge: ROM Only / 基本的な MBC1 / 基本的な MBC2 に対応
+- Cartridge: ROM Only / 基本的な MBC1 / 基本的な MBC2 / 基本的な MBC3 に対応 (RTC レジスタの保持/latched 読み出しは実装、実時間進行は未実装)
 - バッテリバックアップ付きカートリッジはアプリ/フロントエンド側で `"<rom_path>.sav"` に保存
 - APU: レジスタ状態と wave RAM を実装。NR52 の電源状態や一部チャネル状態は扱いますが、音声出力自体はまだありません
 - Serial: ブート初期値、内部クロック転送完了、シリアル割り込み要求、外部クロック時に進まない挙動をテスト済み

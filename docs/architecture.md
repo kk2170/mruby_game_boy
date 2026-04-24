@@ -5,7 +5,7 @@
 - DMG only
 - Boot ROM is currently not loaded, mapped, or executed
 - DMG post-boot register state is applied directly, including `PC=0x0100` and `FF50=1`
-- Cartridge support starts with ROM Only, basic MBC1, and basic MBC2
+- Cartridge support starts with ROM Only, basic MBC1, basic MBC2, and basic MBC3 with latchable RTC register storage but without live RTC progression
 
 ## Main objects
 
@@ -57,7 +57,7 @@ Owns the machine graph and advances the system.
 - ROM normalization
 - header parsing
 - mapper selection
-- currently `RomOnly`, `MBC1`, and `MBC2`
+- currently `RomOnly`, `MBC1`, `MBC2`, and `MBC3`; timer-tagged MBC3 carts can store/latch RTC registers, but live clock progression is not implemented yet
 
 ### `GameBoy::PPU`
 

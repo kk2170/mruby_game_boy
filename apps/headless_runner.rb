@@ -1,11 +1,5 @@
-begin
-  GameBoy::Core
-rescue NameError
-  load File.expand_path('support/load_game_boy.rb', File.dirname(__FILE__))
-end
-
-battery_save_support_path = File.expand_path('support/battery_save.rb', File.dirname(__FILE__))
-eval(File.open(battery_save_support_path, 'rb') { |file| file.read }, binding, battery_save_support_path)
+app_support_path = File.expand_path('support/load_game_boy.rb', File.dirname(__FILE__))
+eval(File.open(app_support_path, 'rb') { |file| file.read }, binding, app_support_path)
 
 rom_path = ARGV[0] || 'test_roms/tobutobugirl/tobu.gb'
 step_count = (ARGV[1] || '0').to_i

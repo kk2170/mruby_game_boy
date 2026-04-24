@@ -28,6 +28,11 @@ module GameBoy
       0x01 => 'MBC1',
       0x02 => 'MBC1+RAM',
       0x03 => 'MBC1+RAM+BATTERY',
+      0x0F => 'MBC3+TIMER+BATTERY',
+      0x10 => 'MBC3+TIMER+RAM+BATTERY',
+      0x11 => 'MBC3',
+      0x12 => 'MBC3+RAM',
+      0x13 => 'MBC3+RAM+BATTERY',
       0x05 => 'MBC2',
       0x06 => 'MBC2+BATTERY'
     }
@@ -41,6 +46,8 @@ module GameBoy
         RomOnly.new(rom_bytes)
       when 0x01, 0x02, 0x03
         MBC1.new(rom_bytes)
+      when 0x0F, 0x10, 0x11, 0x12, 0x13
+        MBC3.new(rom_bytes)
       when 0x05, 0x06
         MBC2.new(rom_bytes)
       else

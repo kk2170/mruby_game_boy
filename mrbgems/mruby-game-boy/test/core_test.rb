@@ -71,6 +71,17 @@ def build_test_mbc2_rom(cartridge_type: 0x06, rom_size_code: 0x03, bytes: {})
   )
 end
 
+def build_test_mbc3_rom(cartridge_type: 0x13, rom_size_code: 0x03, ram_size_code: 0x03, bytes: {})
+  build_test_rom(
+    GameBoy::Cartridge::ROM_SIZE_BYTES[rom_size_code],
+    {
+      0x0147 => cartridge_type,
+      0x0148 => rom_size_code,
+      0x0149 => ram_size_code
+    }.merge(bytes)
+  )
+end
+
 def build_test_timer
   interrupts = GameBoy::Interrupts.new
   [GameBoy::Timer.new(interrupts), interrupts]
@@ -617,6 +628,191 @@ assert('GameBoy::Core battery RAM roundtrips through binary string data') do
   assert_equal 0xF4, restored.bus.read8(0xA001)
 end
 
+assert('GameBoy::Cartridge builds basic MBC3 cartridges') do
+  rom = build_test_mbc3_rom(
+    cartridge_type: 0x12,
+    bytes: {
+      0x4000 => 0x11,
+      0x8000 => 0x22
+    }
+  )
+
+  cart = GameBoy::Cartridge.build(rom)
+
+  assert_equal 'GameBoy::Cartridge::MBC3', cart.class.to_s
+  assert_equal 'MBC3+RAM', cart.header[:cartridge_type_name]
+  assert_equal 0x11, cart.read8(0x4000)
+
+  cart.write8(0x2000, 0x02)
+  assert_equal 0x22, cart.read8(0x4000)
+
+  cart.write8(0x2000, 0x00)
+  assert_equal 0x11, cart.read8(0x4000)
+end
+
+assert('GameBoy::Cartridge builds timer-tagged MBC3 cartridges with RTC register storage') do
+  cart = GameBoy::Cartridge.build(build_test_mbc3_rom(cartridge_type: 0x0F, ram_size_code: 0x00))
+
+  assert_equal 'GameBoy::Cartridge::MBC3', cart.class.to_s
+  assert_equal 'MBC3+TIMER+BATTERY', cart.header[:cartridge_type_name]
+  assert_true cart.battery_backed?
+  assert_equal 0xFF, cart.read8(0xA000)
+end
+
+assert('GameBoy::Cartridge::MBC3 switches RAM banks independently from ROM bank') do
+  cart = GameBoy::Cartridge.build(build_test_mbc3_rom)
+
+  cart.write8(0x0000, 0x0A)
+  cart.write8(0xA000, 0x12)
+  cart.write8(0x4000, 0x01)
+  cart.write8(0xA000, 0x34)
+
+  cart.write8(0x4000, 0x00)
+  assert_equal 0x12, cart.read8(0xA000)
+
+  cart.write8(0x4000, 0x01)
+  assert_equal 0x34, cart.read8(0xA000)
+end
+
+assert('GameBoy::Cartridge::MBC3 exposes RTC registers without aliasing RAM banks') do
+  cart = GameBoy::Cartridge.build(build_test_mbc3_rom(cartridge_type: 0x10))
+
+  cart.write8(0x0000, 0x0A)
+  cart.write8(0xA000, 0x12)
+  cart.write8(0x4000, 0x08)
+
+  cart.write8(0xA000, 0x25)
+  assert_equal 0x25, cart.read8(0xA000)
+
+  cart.write8(0x4000, 0x00)
+
+  assert_equal 0x12, cart.read8(0xA000)
+end
+
+assert('GameBoy::Cartridge::MBC3 latches RTC registers on 0-to-1 latch write') do
+  cart = GameBoy::Cartridge.build(build_test_mbc3_rom(cartridge_type: 0x10))
+
+  cart.write8(0x0000, 0x0A)
+  cart.write8(0x4000, 0x08)
+  cart.write8(0xA000, 0x01)
+  cart.write8(0x6000, 0x00)
+  cart.write8(0x6000, 0x01)
+  cart.write8(0xA000, 0x02)
+
+  assert_equal 0x01, cart.read8(0xA000)
+
+  cart.write8(0x6000, 0x00)
+  assert_equal 0x02, cart.read8(0xA000)
+end
+
+assert('GameBoy::Cartridge::MBC3 ignores RTC writes while RAM/RTC is disabled') do
+  cart = GameBoy::Cartridge.build(build_test_mbc3_rom(cartridge_type: 0x10))
+
+  cart.write8(0x4000, 0x08)
+  cart.write8(0xA000, 0x33)
+  cart.write8(0x0000, 0x0A)
+
+  assert_equal 0x00, cart.read8(0xA000)
+end
+
+assert('GameBoy::Core#reset resets MBC3 bank state without clearing RAM') do
+  rom = build_test_mbc3_rom(bytes: {
+    0x4000 => 0x11,
+    0x8000 => 0x22
+  })
+  core = GameBoy::Core.new(rom)
+
+  core.bus.write8(0x0000, 0x0A)
+  core.bus.write8(0x2000, 0x02)
+  core.bus.write8(0x4000, 0x01)
+  core.bus.write8(0xA000, 0x5A)
+
+  assert_equal 0x22, core.bus.read8(0x4000)
+  assert_equal 0x5A, core.bus.read8(0xA000)
+
+  core.reset
+
+  assert_equal 0x11, core.bus.read8(0x4000)
+  assert_equal 0xFF, core.bus.read8(0xA000)
+
+  core.bus.write8(0x0000, 0x0A)
+  core.bus.write8(0x4000, 0x01)
+
+  assert_equal 0x5A, core.bus.read8(0xA000)
+end
+
+assert('GameBoy::Cartridge::MBC3 battery RAM dump/load roundtrips for type 0x13') do
+  cart = GameBoy::Cartridge.build(build_test_mbc3_rom)
+
+  assert_true cart.battery_backed?
+
+  cart.write8(0x0000, 0x0A)
+  cart.write8(0xA000, 0x12)
+  cart.write8(0x4000, 0x01)
+  cart.write8(0xA000, 0x34)
+
+  dump = cart.dump_battery_ram
+  restored = GameBoy::Cartridge.build(build_test_mbc3_rom)
+
+  restored.load_battery_ram(dump)
+  restored.write8(0x0000, 0x0A)
+
+  assert_equal 0x12, restored.read8(0xA000)
+
+  restored.write8(0x4000, 0x01)
+  assert_equal 0x34, restored.read8(0xA000)
+end
+
+assert('GameBoy::Cartridge::MBC3 battery dump/load preserves RTC registers for type 0x10') do
+  cart = GameBoy::Cartridge.build(build_test_mbc3_rom(cartridge_type: 0x10))
+
+  cart.write8(0x0000, 0x0A)
+  cart.write8(0x4000, 0x08)
+  cart.write8(0xA000, 0x12)
+  cart.write8(0x4000, 0x0C)
+  cart.write8(0xA000, 0x41)
+  cart.write8(0x6000, 0x00)
+  cart.write8(0x6000, 0x01)
+
+  dump = cart.dump_battery_ram
+  restored = GameBoy::Cartridge.build(build_test_mbc3_rom(cartridge_type: 0x10))
+
+  restored.load_battery_ram(dump)
+  restored.write8(0x0000, 0x0A)
+  restored.write8(0x4000, 0x08)
+  assert_equal 0x12, restored.read8(0xA000)
+
+  restored.write8(0x4000, 0x0C)
+  assert_equal 0x41, restored.read8(0xA000)
+
+  restored.write8(0x4000, 0x08)
+  restored.write8(0xA000, 0x22)
+  restored.write8(0x6000, 0x01)
+  assert_equal 0x12, restored.read8(0xA000)
+
+  restored.write8(0x6000, 0x00)
+  assert_equal 0x22, restored.read8(0xA000)
+end
+
+assert('GameBoy::Core#reset preserves MBC3 RTC registers while clearing latch state') do
+  core = GameBoy::Core.new(build_test_mbc3_rom(cartridge_type: 0x10))
+
+  core.bus.write8(0x0000, 0x0A)
+  core.bus.write8(0x4000, 0x08)
+  core.bus.write8(0xA000, 0x12)
+  core.bus.write8(0x6000, 0x00)
+  core.bus.write8(0x6000, 0x01)
+  core.bus.write8(0xA000, 0x34)
+
+  assert_equal 0x12, core.bus.read8(0xA000)
+
+  core.reset
+  core.bus.write8(0x0000, 0x0A)
+  core.bus.write8(0x4000, 0x08)
+
+  assert_equal 0x34, core.bus.read8(0xA000)
+end
+
 assert('GameBoy::Cartridge builds basic MBC2 cartridges') do
   rom = build_test_mbc2_rom(
     cartridge_type: 0x05,
@@ -758,6 +954,49 @@ assert('GameBoy::DMA can read source bytes from FF00 page registers') do
   assert_equal core.bus.read8(0xFF07), core.ppu.read_oam(0xFE07)
   assert_equal core.bus.read8(0xFF0F), core.ppu.read_oam(0xFE0F)
   assert_equal 0xFF, core.ppu.read_oam(0xFE7F)
+end
+
+assert('GameBoy::Core ROM-driven DMA stays active through 636 dots and completes by 644 dots') do
+  rom = build_test_rom(0x8000, {
+    0x0147 => 0x00,
+    0x0100 => 0x3E,
+    0x0101 => 0xC0,
+    0x0102 => 0x0E,
+    0x0103 => 0x46,
+    0x0104 => 0xE2,
+    0x0105 => 0x00,
+    0x0106 => 0x00
+  })
+  core = GameBoy::Core.new(rom)
+
+  5.times do |index|
+    core.bus.write8(0xC000 + index, 0x10 + index)
+  end
+
+  core.ppu.write_oam(0xFE03, 0xEE)
+  core.ppu.write_oam(0xFE04, 0xDD)
+
+  assert_equal 8, core.step
+  assert_equal 8, core.step
+  assert_equal 8, core.step
+  assert_true core.dma.active?
+
+  157.times do
+    assert_equal 4, core.step
+  end
+
+  assert_true core.dma.active?
+
+  2.times do
+    assert_equal 4, core.step
+  end
+
+  assert_false core.dma.active?
+  assert_equal 0x10, core.ppu.read_oam(0xFE00)
+  assert_equal 0x11, core.ppu.read_oam(0xFE01)
+  assert_equal 0x12, core.ppu.read_oam(0xFE02)
+  assert_equal 0x13, core.ppu.read_oam(0xFE03)
+  assert_equal 0x14, core.ppu.read_oam(0xFE04)
 end
 
 assert('GameBoy::FrameExporter outputs PPM header') do
