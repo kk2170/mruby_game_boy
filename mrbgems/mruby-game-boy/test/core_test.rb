@@ -505,6 +505,54 @@ assert('GameBoy::APU returns 0xFF for unused hole registers and ignores writes')
   assert_equal 0xFF, core.bus.read8(0xFF1F)
 end
 
+assert('GameBoy::APU applies DMG-style masked register readback') do
+  core = GameBoy::Core.new(Array.new(0x8000, 0))
+
+  core.bus.write8(0xFF26, 0x00)
+  core.bus.write8(0xFF26, 0x80)
+  core.bus.write8(0xFF10, 0x05)
+  core.bus.write8(0xFF11, 0x80)
+  core.bus.write8(0xFF12, 0xF3)
+  core.bus.write8(0xFF13, 0x77)
+  core.bus.write8(0xFF14, 0x40)
+  core.bus.write8(0xFF1A, 0x00)
+  core.bus.write8(0xFF1C, 0x20)
+  core.bus.write8(0xFF24, 0x56)
+  core.bus.write8(0xFF25, 0xA7)
+
+  assert_equal 0x85, core.bus.read8(0xFF10)
+  assert_equal 0xBF, core.bus.read8(0xFF11)
+  assert_equal 0xF3, core.bus.read8(0xFF12)
+  assert_equal 0xFF, core.bus.read8(0xFF13)
+  assert_equal 0xFF, core.bus.read8(0xFF14)
+  assert_equal 0x7F, core.bus.read8(0xFF1A)
+  assert_equal 0xBF, core.bus.read8(0xFF1C)
+  assert_equal 0x56, core.bus.read8(0xFF24)
+  assert_equal 0xA7, core.bus.read8(0xFF25)
+end
+
+assert('GameBoy::APU restores masked reset reads after NR52 power cycle') do
+  core = GameBoy::Core.new(Array.new(0x8000, 0))
+
+  core.bus.write8(0xFF26, 0x00)
+  core.bus.write8(0xFF26, 0x80)
+  core.bus.write8(0xFF10, 0x05)
+  core.bus.write8(0xFF11, 0x80)
+  core.bus.write8(0xFF1A, 0x80)
+  core.bus.write8(0xFF1C, 0x20)
+
+  core.bus.write8(0xFF26, 0x00)
+  core.bus.write8(0xFF26, 0x80)
+
+  assert_equal 0x80, core.bus.read8(0xFF10)
+  assert_equal 0x3F, core.bus.read8(0xFF11)
+  assert_equal 0xBF, core.bus.read8(0xFF14)
+  assert_equal 0x7F, core.bus.read8(0xFF1A)
+  assert_equal 0x9F, core.bus.read8(0xFF1C)
+  assert_equal 0x00, core.bus.read8(0xFF24)
+  assert_equal 0x00, core.bus.read8(0xFF25)
+end
+
 assert('GameBoy::Cartridge builds basic MBC1 cartridges') do
   rom = build_test_rom(
     0x8000,

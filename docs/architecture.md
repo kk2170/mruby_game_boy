@@ -37,6 +37,7 @@ Owns the machine graph and advances the system.
 
 - minimal audio-register device for `FF10..FF3F`
 - stores APU register state and wave RAM
+- applies DMG-style masked readback for partially readable / write-only sound registers
 - exposes `NR52` power/status behavior needed by current tests
 - returns `0xFF` for unused hole registers and ignores writes there
 

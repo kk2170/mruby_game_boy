@@ -17,7 +17,7 @@ pure mruby を優先した、初期段階の DMG(Game Boy) エミュレータ用
 - PPU: 160x144 フレームバッファ、走査線タイミング、VBlank、BG/Window/OBJ 描画、DMG スプライト優先順位、VRAM/OAM 制限を実装
 - Cartridge: ROM Only / 基本的な MBC1 / 基本的な MBC2 / 基本的な MBC3 に対応 (RTC レジスタ保持/latched 読み出しと、ホスト時間源ベースの基本的な進行を実装)
 - バッテリバックアップ付きカートリッジはアプリ/フロントエンド側で `"<rom_path>.sav"` に保存
-- APU: レジスタ状態と wave RAM を実装。NR52 の電源状態や一部チャネル状態は扱いますが、音声出力自体はまだありません
+- APU: レジスタ状態、DMG相当のマスク付きレジスタ読み出し、wave RAM を実装。NR52 の電源状態や一部チャネル状態は扱いますが、音声出力自体はまだありません
 - Serial: ブート初期値、内部クロック転送完了、シリアル割り込み要求、外部クロック時に進まない挙動をテスト済み
 - Joypad/DMA/Timer: FF00 入力行列、STOP 復帰に関わる入力変化、FF46 DMA、dot ベースのタイマ進行を含む構成
 - Test: `mrbgems/mruby-game-boy/test/core_test.rb` に CPU / STOP / APU / Serial / PPU / DMA / Joypad まわりの回帰テストがあります
@@ -130,6 +130,13 @@ bash docker/verify_tobutobugirl_compat.sh test_roms/tobutobugirl/tobu.gb
 このスクリプトは ROM を `tmp/verify_tobutobugirl_compat/` 配下へコピーし、1 フレームぶんの出力概要と画像ハッシュを照合します。
 
 ## Docker build/run
+
+## 今後の主な残作業
+
+- APU の frame sequencer / length / envelope / sweep 挙動と実際の音声出力
+- MBC3 の壁時計ベースでより堅牢な RTC 永続化
+- ROM Only / 基本的な MBC1 / 基本的な MBC2 / 基本的な MBC3 を超える mapper 対応
+- ROM 駆動の互換性 / タイミング回帰の拡充
 
 mruby と SDL2 環境を Docker で用意する場合:
 

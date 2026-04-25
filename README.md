@@ -18,7 +18,7 @@ Pure mruby first Game Boy emulator workspace.
 - PPU includes scanline timing, VBlank, a 160x144 framebuffer, BG/Window/OBJ rendering, DMG sprite priority rules, and VRAM/OAM access restrictions
 - Cartridge support includes ROM Only, basic MBC1, basic MBC2, and basic MBC3 with latchable RTC register storage and basic live RTC progression from a host time source
 - Battery-backed cartridges persist app/frontend saves as `"<rom_path>.sav"`
-- APU currently models register state and wave RAM, including NR52 power/status handling, but does not produce audio yet
+- APU currently models register state, DMG-style masked register readback, and wave RAM, including NR52 power/status handling, but does not produce audio yet
 - Serial covers boot-state registers, internal clock transfer completion, interrupt request timing, and the external-clock no-progress case
 - Targeted tests live in `mrbgems/mruby-game-boy/test/core_test.rb` for CPU, STOP, APU, Serial, PPU, DMA, and Joypad behavior
 
@@ -118,6 +118,7 @@ Run the mruby test suite from your local mruby checkout:
 
 ### After that
 
+- APU frame-sequencer / length / envelope / sweep behavior and actual audio output
 - more accurate wall-clock / reboot-safe RTC behavior for MBC3 variants that need it
 - MBC variants beyond the current ROM Only / basic MBC1 / basic MBC2 / basic MBC3 support
 - broader ROM-driven compatibility and timing regression coverage
