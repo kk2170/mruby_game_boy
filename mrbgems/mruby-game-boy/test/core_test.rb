@@ -717,6 +717,54 @@ assert('GameBoy::Cartridge::MBC3 latches RTC registers on 0-to-1 latch write') d
   assert_equal 0x02, cart.read8(0xA000)
 end
 
+assert('GameBoy::Cartridge::MBC3 advances live RTC registers from host time') do
+  fake_time = 1_000
+  GameBoy::Cartridge::MBC3.time_source = -> { fake_time }
+
+  begin
+    cart = GameBoy::Cartridge.build(build_test_mbc3_rom(cartridge_type: 0x10))
+
+    cart.write8(0x0000, 0x0A)
+    cart.write8(0x4000, 0x08)
+    assert_equal 0x00, cart.read8(0xA000)
+
+    fake_time += 61
+    assert_equal 0x01, cart.read8(0xA000)
+
+    cart.write8(0x4000, 0x09)
+    assert_equal 0x01, cart.read8(0xA000)
+  ensure
+    GameBoy::Cartridge::MBC3.time_source = nil
+  end
+end
+
+assert('GameBoy::Cartridge::MBC3 halt bit pauses and resumes live RTC progression') do
+  fake_time = 2_000
+  GameBoy::Cartridge::MBC3.time_source = -> { fake_time }
+
+  begin
+    cart = GameBoy::Cartridge.build(build_test_mbc3_rom(cartridge_type: 0x10))
+
+    cart.write8(0x0000, 0x0A)
+    cart.write8(0x4000, 0x08)
+    cart.write8(0xA000, 0x05)
+    cart.write8(0x4000, 0x0C)
+    cart.write8(0xA000, 0x40)
+
+    fake_time += 120
+    cart.write8(0x4000, 0x08)
+    assert_equal 0x05, cart.read8(0xA000)
+
+    cart.write8(0x4000, 0x0C)
+    cart.write8(0xA000, 0x00)
+    fake_time += 3
+    cart.write8(0x4000, 0x08)
+    assert_equal 0x08, cart.read8(0xA000)
+  ensure
+    GameBoy::Cartridge::MBC3.time_source = nil
+  end
+end
+
 assert('GameBoy::Cartridge::MBC3 ignores RTC writes while RAM/RTC is disabled') do
   cart = GameBoy::Cartridge.build(build_test_mbc3_rom(cartridge_type: 0x10))
 
@@ -804,6 +852,41 @@ assert('GameBoy::Cartridge::MBC3 battery dump/load preserves RTC registers for t
 
   restored.write8(0x6000, 0x00)
   assert_equal 0x22, restored.read8(0xA000)
+end
+
+assert('GameBoy::Cartridge::MBC3 battery dump/load keeps live RTC progression across reload') do
+  fake_time = 3_000
+  GameBoy::Cartridge::MBC3.time_source = -> { fake_time }
+
+  begin
+    cart = GameBoy::Cartridge.build(build_test_mbc3_rom(cartridge_type: 0x10))
+
+    cart.write8(0x0000, 0x0A)
+    cart.write8(0x4000, 0x08)
+    cart.write8(0xA000, 0x3A)
+    cart.write8(0x4000, 0x09)
+    cart.write8(0xA000, 0x3B)
+    cart.write8(0x4000, 0x0A)
+    cart.write8(0xA000, 0x17)
+
+    dump = cart.dump_battery_ram
+
+    fake_time += 5
+    restored = GameBoy::Cartridge.build(build_test_mbc3_rom(cartridge_type: 0x10))
+    restored.load_battery_ram(dump)
+    restored.write8(0x0000, 0x0A)
+
+    restored.write8(0x4000, 0x08)
+    assert_equal 0x03, restored.read8(0xA000)
+    restored.write8(0x4000, 0x09)
+    assert_equal 0x00, restored.read8(0xA000)
+    restored.write8(0x4000, 0x0A)
+    assert_equal 0x00, restored.read8(0xA000)
+    restored.write8(0x4000, 0x0B)
+    assert_equal 0x01, restored.read8(0xA000)
+  ensure
+    GameBoy::Cartridge::MBC3.time_source = nil
+  end
 end
 
 assert('GameBoy::Core#reset preserves MBC3 RTC registers while clearing latch state') do

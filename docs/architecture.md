@@ -5,7 +5,7 @@
 - DMG only
 - Boot ROM is currently not loaded, mapped, or executed
 - DMG post-boot register state is applied directly, including `PC=0x0100` and `FF50=1`
-- Cartridge support starts with ROM Only, basic MBC1, basic MBC2, and basic MBC3 with latchable RTC register storage but without live RTC progression
+- Cartridge support starts with ROM Only, basic MBC1, basic MBC2, and basic MBC3 with latchable RTC register storage plus basic live RTC progression from a host time source
 
 ## Main objects
 
@@ -57,7 +57,7 @@ Owns the machine graph and advances the system.
 - ROM normalization
 - header parsing
 - mapper selection
-- currently `RomOnly`, `MBC1`, `MBC2`, and `MBC3`; timer-tagged MBC3 carts can store/latch RTC registers, but live clock progression is not implemented yet
+- currently `RomOnly`, `MBC1`, `MBC2`, and `MBC3`; timer-tagged MBC3 carts can store/latch RTC registers and advance them from a host time source
 
 ### `GameBoy::PPU`
 
@@ -169,6 +169,7 @@ The current verification path is:
 - headless runner under mruby in Docker
 - frame dump under mruby in Docker
 - battery-save smoke regression via `docker/verify_battery_save.sh`
+- TobuTobuGirl ROM-driven compatibility regression via `docker/verify_tobutobugirl_compat.sh`
 - SDL2 frontend under mruby with `SDL_VIDEODRIVER=dummy`
 - optional real X11 execution via `docker/run_sdl2.sh`
 - regression coverage in `mrbgems/mruby-game-boy/test/core_test.rb` for:

@@ -16,7 +16,7 @@ Pure mruby first Game Boy emulator workspace.
 
 - CPU execution is still partial, but boot-state startup, interrupt entry, JR, conditional CALL, HALT bug, and STOP stop/wake behavior are covered by regression tests
 - PPU includes scanline timing, VBlank, a 160x144 framebuffer, BG/Window/OBJ rendering, DMG sprite priority rules, and VRAM/OAM access restrictions
-- Cartridge support includes ROM Only, basic MBC1, basic MBC2, and basic MBC3 with latchable RTC register storage (live clock progression not implemented yet)
+- Cartridge support includes ROM Only, basic MBC1, basic MBC2, and basic MBC3 with latchable RTC register storage and basic live RTC progression from a host time source
 - Battery-backed cartridges persist app/frontend saves as `"<rom_path>.sav"`
 - APU currently models register state and wave RAM, including NR52 power/status handling, but does not produce audio yet
 - Serial covers boot-state registers, internal clock transfer completion, interrupt request timing, and the external-clock no-progress case
@@ -118,7 +118,7 @@ Run the mruby test suite from your local mruby checkout:
 
 ### After that
 
-- live RTC clock progression for MBC3 variants that need it
+- more accurate wall-clock / reboot-safe RTC behavior for MBC3 variants that need it
 - MBC variants beyond the current ROM Only / basic MBC1 / basic MBC2 / basic MBC3 support
 - broader ROM-driven compatibility and timing regression coverage
 
@@ -159,6 +159,14 @@ bash docker/verify_battery_save.sh test_roms/tobutobugirl/tobu.gb
 ```
 
 The script copies the ROM under `tmp/verify_battery_save/` so it can create and reload `"<rom_path>.sav"` without touching a save next to your original ROM.
+
+Run the TobuTobuGirl ROM-driven compatibility regression inside Docker:
+
+```sh
+bash docker/verify_tobutobugirl_compat.sh test_roms/tobutobugirl/tobu.gb
+```
+
+The script copies the ROM under `tmp/verify_tobutobugirl_compat/`, runs a single-frame dump, and checks both the frame summary and output image hash.
 
 The Docker setup clones `mruby` into a named Docker volume on first run and keeps the emulator core repository mounted from the host.
 `docker/run_sdl2.sh` will also mount `/tmp/.X11-unix` and `.Xauthority` when available.

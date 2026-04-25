@@ -22,3 +22,21 @@ unless game_boy_loaded
 end
 
 eval_support_file.call(File.join(script_dir, 'battery_save.rb'))
+
+mbc3_loaded = true
+
+begin
+  GameBoy::Cartridge::MBC3
+rescue NameError
+  mbc3_loaded = false
+end
+
+if mbc3_loaded
+  GameBoy::Cartridge::MBC3.time_source = lambda do
+    begin
+      ::Time.now.to_i
+    rescue NameError
+      0
+    end
+  end
+end

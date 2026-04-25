@@ -3,6 +3,18 @@ module GameBoy
     class MBC3
       RTC_REGISTERS = [0x08, 0x09, 0x0A, 0x0B, 0x0C].freeze
 
+      class << self
+        attr_writer :time_source
+
+        def current_unix_time
+          if @time_source
+            @time_source.call.to_i
+          else
+            0
+          end
+        end
+      end
+
       attr_reader :rom, :header
 
       def initialize(rom_bytes)
@@ -36,6 +48,8 @@ module GameBoy
       def dump_battery_ram
         return nil unless battery_backed?
 
+        sync_rtc!
+
         dump = @ram.dup
 
         RTC_REGISTERS.each do |register|
@@ -48,6 +62,7 @@ module GameBoy
 
         dump << (@rtc_latched ? 1 : 0)
         dump << (@rtc_latch_value & 0x01)
+        append_u32_le(dump, @rtc_reference_unix)
         dump
       end
 
@@ -75,6 +90,14 @@ module GameBoy
         @rtc_latched = (Cartridge.byte_at(dump, index) || 0) != 0
         index += 1
         @rtc_latch_value = (Cartridge.byte_at(dump, index) || 0) & 0x01
+        index += 1
+
+        persisted_reference = read_u32_le(dump, index)
+        @rtc_reference_unix = if persisted_reference.nil?
+                                self.class.current_unix_time
+                              else
+                                persisted_reference
+                              end
       end
 
       def read8(addr)
@@ -88,6 +111,7 @@ module GameBoy
           Cartridge.byte_at(@rom, bank_addr) || 0xFF
         when 0xA000..0xBFFF
           return 0xFF unless @ram_enabled
+          sync_rtc!
           return read_rtc_register if rtc_selected?
           return 0xFF if @ram.empty? || !ram_bank_selected?
 
@@ -110,8 +134,10 @@ module GameBoy
         when 0x4000..0x5FFF
           @ram_select = value & 0x0F
         when 0x6000..0x7FFF
+          sync_rtc!
           latch_rtc(value)
         when 0xA000..0xBFFF
+          sync_rtc!
           write_rtc_register(value) if @ram_enabled && rtc_selected?
           @ram[ram_index(addr)] = value if !@ram.empty? && @ram_enabled && ram_bank_selected?
         end
@@ -133,6 +159,7 @@ module GameBoy
           0x0B => 0x00,
           0x0C => 0x00
         }
+        @rtc_reference_unix = self.class.current_unix_time
       end
 
       def selected_ram_bank
@@ -161,7 +188,9 @@ module GameBoy
       def write_rtc_register(value)
         return unless rtc_selected?
 
+        current_time = self.class.current_unix_time
         @rtc_registers[@ram_select] = normalize_rtc_value(@ram_select, value)
+        @rtc_reference_unix = current_time
       end
 
       def latch_rtc(value)
@@ -189,6 +218,83 @@ module GameBoy
 
       def ram_index(addr)
         ((selected_ram_bank * 0x2000) + (addr - 0xA000)) % @ram.length
+      end
+
+      def sync_rtc!
+        return unless rtc_supported?
+        return if rtc_halted?
+
+        current_time = self.class.current_unix_time
+        elapsed = current_time - @rtc_reference_unix
+        if elapsed < 0
+          @rtc_reference_unix = current_time
+          return
+        end
+        return unless elapsed > 0
+
+        advance_rtc_seconds(elapsed)
+        @rtc_reference_unix = current_time
+      end
+
+      def rtc_halted?
+        (@rtc_registers[0x0C] & 0x40) != 0
+      end
+
+      def rtc_day_carry?
+        (@rtc_registers[0x0C] & 0x80) != 0
+      end
+
+      def rtc_total_seconds
+        days = @rtc_registers[0x0B] | ((@rtc_registers[0x0C] & 0x01) << 8)
+        ((days * 24 + @rtc_registers[0x0A]) * 60 + @rtc_registers[0x09]) * 60 + @rtc_registers[0x08]
+      end
+
+      def advance_rtc_seconds(elapsed)
+        total_seconds = rtc_total_seconds + elapsed
+        days = total_seconds / 86_400
+        remainder = total_seconds % 86_400
+        carry = rtc_day_carry?
+
+        if days >= 512
+          carry = true
+          days %= 512
+        end
+
+        @rtc_registers[0x08] = remainder % 60
+        remainder /= 60
+        @rtc_registers[0x09] = remainder % 60
+        remainder /= 60
+        @rtc_registers[0x0A] = remainder % 24
+        @rtc_registers[0x0B] = days & 0xFF
+
+        halt_bit = @rtc_registers[0x0C] & 0x40
+        high_day_bit = (days >> 8) & 0x01
+        carry_bit = carry ? 0x80 : 0x00
+        @rtc_registers[0x0C] = halt_bit | carry_bit | high_day_bit
+      end
+
+      def append_u32_le(buffer, value)
+        packed = value.to_i & 0xFFFF_FFFF
+        4.times do
+          buffer << (packed & 0xFF)
+          packed >>= 8
+        end
+      end
+
+      def read_u32_le(buffer, index)
+        byte0 = Cartridge.byte_at(buffer, index)
+        return nil if byte0.nil?
+
+        value = 0
+        shift = 0
+
+        4.times do |offset|
+          byte = Cartridge.byte_at(buffer, index + offset) || 0
+          value |= byte << shift
+          shift += 8
+        end
+
+        value
       end
     end
   end
