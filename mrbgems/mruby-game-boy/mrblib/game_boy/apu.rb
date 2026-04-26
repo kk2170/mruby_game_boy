@@ -42,6 +42,7 @@ module GameBoy
       @wave_ram = Array.new(0x10, 0x00)
       @power_on = false
       @channel_status = 0x00
+      reset_sequencer
       clear_registers
     end
 
@@ -49,6 +50,7 @@ module GameBoy
       clear_registers
       @wave_ram = Array.new(0x10, 0x00)
       @channel_status = 0x00
+      reset_sequencer
 
       keys = values.keys
       index = 0
@@ -68,6 +70,17 @@ module GameBoy
 
       @power_on = (@registers[0xFF26] & 0x80) != 0
       @channel_status = @registers[0xFF26] & 0x0F
+    end
+
+    def tick(dots)
+      return unless @power_on
+
+      @frame_sequencer_dots += dots
+
+      while @frame_sequencer_dots >= 8_192
+        @frame_sequencer_dots -= 8_192
+        advance_frame_sequencer
+      end
     end
 
     def read_io(addr)
@@ -99,6 +112,7 @@ module GameBoy
         return value unless @power_on
 
         @registers[addr] = value
+        reload_length(addr, value)
         update_dac_status(addr)
         trigger_channel(addr, value)
       end
@@ -123,11 +137,15 @@ module GameBoy
       if (value & 0x80) == 0
         @power_on = false
         @channel_status = 0x00
+        reset_sequencer
         clear_registers
         return
       end
 
-      clear_registers unless @power_on
+      unless @power_on
+        clear_registers
+        reset_sequencer
+      end
 
       @power_on = true
       @registers[0xFF26] = 0x80 | (@channel_status & 0x0F)
@@ -140,7 +158,68 @@ module GameBoy
       return unless status_bit
       return unless dac_enabled_for_trigger?(addr)
 
+      reload_length_on_trigger(addr)
       @channel_status |= status_bit
+      @registers[0xFF26] = 0x80 | (@channel_status & 0x0F)
+    end
+
+    def reset_sequencer
+      @frame_sequencer_dots = 0
+      @frame_sequencer_step = 0
+      @length_counters = {
+        0xFF14 => 0,
+        0xFF19 => 0,
+        0xFF1E => 0,
+        0xFF23 => 0
+      }
+    end
+
+    def advance_frame_sequencer
+      clock_length_counters if (@frame_sequencer_step & 0x01) == 0
+      @frame_sequencer_step = (@frame_sequencer_step + 1) & 0x07
+    end
+
+    def clock_length_counters
+      STATUS_BITS.keys.each do |addr|
+        next unless length_enabled?(addr)
+        next unless @length_counters[addr] > 0
+
+        @length_counters[addr] -= 1
+        disable_channel(addr) if @length_counters[addr] == 0
+      end
+    end
+
+    def reload_length(addr, value)
+      case addr
+      when 0xFF11, 0xFF16
+        @length_counters[channel_trigger_register(addr)] = 64 - (value & 0x3F)
+      when 0xFF1B
+        @length_counters[0xFF1E] = 256 - value
+      when 0xFF20
+        @length_counters[0xFF23] = 64 - (value & 0x3F)
+      end
+    end
+
+    def reload_length_on_trigger(addr)
+      return unless @length_counters[addr] == 0
+
+      @length_counters[addr] = addr == 0xFF1E ? 256 : 64
+    end
+
+    def channel_trigger_register(addr)
+      case addr
+      when 0xFF11 then 0xFF14
+      when 0xFF16 then 0xFF19
+      else addr
+      end
+    end
+
+    def length_enabled?(addr)
+      (@registers[addr] & 0x40) != 0
+    end
+
+    def disable_channel(addr)
+      @channel_status &= (~STATUS_BITS[addr]) & 0x0F
       @registers[0xFF26] = 0x80 | (@channel_status & 0x0F)
     end
 

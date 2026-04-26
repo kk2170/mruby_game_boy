@@ -553,6 +553,72 @@ assert('GameBoy::APU restores masked reset reads after NR52 power cycle') do
   assert_equal 0x00, core.bus.read8(0xFF25)
 end
 
+assert('GameBoy::APU clocks length counters for all channels via frame sequencer') do
+  core = GameBoy::Core.new(Array.new(0x8000, 0))
+
+  core.bus.write8(0xFF26, 0x00)
+  core.bus.write8(0xFF26, 0x80)
+  core.bus.write8(0xFF12, 0x77)
+  core.bus.write8(0xFF17, 0x77)
+  core.bus.write8(0xFF1A, 0x80)
+  core.bus.write8(0xFF21, 0x08)
+  core.bus.write8(0xFF11, 0x3F)
+  core.bus.write8(0xFF16, 0x3F)
+  core.bus.write8(0xFF1B, 0xFF)
+  core.bus.write8(0xFF20, 0x3F)
+  core.bus.write8(0xFF14, 0xC0)
+  core.bus.write8(0xFF19, 0xC0)
+  core.bus.write8(0xFF1E, 0xC0)
+  core.bus.write8(0xFF23, 0xC0)
+
+  assert_equal 0xFF, core.bus.read8(0xFF26)
+
+  core.run_steps(2048)
+
+  assert_equal 0xF0, core.bus.read8(0xFF26)
+end
+
+assert('GameBoy::APU does not expire channels when length enable is clear') do
+  core = GameBoy::Core.new(Array.new(0x8000, 0))
+
+  core.bus.write8(0xFF26, 0x00)
+  core.bus.write8(0xFF26, 0x80)
+  core.bus.write8(0xFF12, 0x77)
+  core.bus.write8(0xFF11, 0x3F)
+  core.bus.write8(0xFF14, 0x80)
+
+  assert_equal 0xF1, core.bus.read8(0xFF26)
+
+  core.run_steps(2048)
+
+  assert_equal 0xF1, core.bus.read8(0xFF26)
+end
+
+assert('GameBoy::APU power cycle resets length sequencer timing') do
+  core = GameBoy::Core.new(Array.new(0x8000, 0))
+
+  core.bus.write8(0xFF26, 0x00)
+  core.bus.write8(0xFF26, 0x80)
+  core.bus.write8(0xFF12, 0x77)
+  core.bus.write8(0xFF11, 0x3F)
+  core.bus.write8(0xFF14, 0xC0)
+
+  core.run_steps(1024)
+  assert_equal 0xF1, core.bus.read8(0xFF26)
+
+  core.bus.write8(0xFF26, 0x00)
+  core.bus.write8(0xFF26, 0x80)
+  core.bus.write8(0xFF12, 0x77)
+  core.bus.write8(0xFF11, 0x3F)
+  core.bus.write8(0xFF14, 0xC0)
+
+  core.run_steps(1024)
+  assert_equal 0xF1, core.bus.read8(0xFF26)
+
+  core.run_steps(1024)
+  assert_equal 0xF0, core.bus.read8(0xFF26)
+end
+
 assert('GameBoy::Cartridge builds basic MBC1 cartridges') do
   rom = build_test_rom(
     0x8000,

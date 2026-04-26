@@ -58,6 +58,7 @@ module GameBoy
       dots = @cpu.step
       @dma.tick(dots)
       @timer.tick(dots)
+      @apu.tick(dots)
       @serial.tick(dots)
       @ppu.tick(dots)
       dots
