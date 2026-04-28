@@ -37,6 +37,32 @@ class GameBoy::PPU
   end
 end
 
+class GameBoy::APU
+  def envelope_volume_for_test(channel_bit)
+    @envelope_volumes[channel_bit]
+  end
+
+  def envelope_timer_for_test(channel_bit)
+    @envelope_timers[channel_bit]
+  end
+
+  def sweep_timer_for_test
+    @sweep_timer
+  end
+
+  def sweep_shadow_frequency_for_test
+    @sweep_shadow_frequency
+  end
+
+  def sweep_enabled_for_test
+    @sweep_enabled
+  end
+
+  def ch1_frequency_for_test
+    ((@registers[0xFF14] & 0x07) << 8) | @registers[0xFF13]
+  end
+end
+
 def build_test_rom(size, bytes = {})
   rom = "\x00" * size
   index = 0
@@ -617,6 +643,138 @@ assert('GameBoy::APU power cycle resets length sequencer timing') do
 
   core.run_steps(1024)
   assert_equal 0xF0, core.bus.read8(0xFF26)
+end
+
+assert('GameBoy::APU ignores CH3 wave RAM writes while CH3 is active') do
+  core = GameBoy::Core.new(Array.new(0x8000, 0))
+
+  core.bus.write8(0xFF26, 0x00)
+  core.bus.write8(0xFF26, 0x80)
+  core.bus.write8(0xFF30, 0x12)
+  core.bus.write8(0xFF1A, 0x80)
+  core.bus.write8(0xFF1E, 0x80)
+
+  assert_equal 0xF4, core.bus.read8(0xFF26)
+
+  core.bus.write8(0xFF30, 0x99)
+  assert_equal 0x12, core.bus.read8(0xFF30)
+
+  core.bus.write8(0xFF26, 0x00)
+  core.bus.write8(0xFF26, 0x80)
+  core.bus.write8(0xFF30, 0x99)
+
+  assert_equal 0x99, core.bus.read8(0xFF30)
+end
+
+assert('GameBoy::APU CH2 trigger latches envelope state and clocks it on frame sequencer step 7') do
+  core = GameBoy::Core.new(Array.new(0x8000, 0))
+
+  core.bus.write8(0xFF26, 0x00)
+  core.bus.write8(0xFF26, 0x80)
+  core.bus.write8(0xFF17, 0xA2)
+  core.bus.write8(0xFF19, 0x80)
+
+  assert_equal 0x02, core.apu.envelope_timer_for_test(0x02)
+  assert_equal 0x0A, core.apu.envelope_volume_for_test(0x02)
+
+  core.run_steps(16_384)
+
+  assert_equal 0x02, core.bus.read8(0xFF26) & 0x02
+  assert_equal 0x0A, core.apu.envelope_volume_for_test(0x02)
+  assert_equal 0x01, core.apu.envelope_timer_for_test(0x02)
+
+  core.run_steps(16_384)
+
+  assert_equal 0x09, core.apu.envelope_volume_for_test(0x02)
+  assert_equal 0x02, core.apu.envelope_timer_for_test(0x02)
+end
+
+assert('GameBoy::APU CH2 envelope clamps at zero without wrapping') do
+  core = GameBoy::Core.new(Array.new(0x8000, 0))
+
+  core.bus.write8(0xFF26, 0x00)
+  core.bus.write8(0xFF26, 0x80)
+  core.bus.write8(0xFF17, 0x11)
+  core.bus.write8(0xFF19, 0x80)
+
+  8.times do
+    core.run_steps(16_384)
+  end
+
+  assert_equal 0x00, core.apu.envelope_volume_for_test(0x02)
+
+  core.run_steps(16_384)
+
+  assert_equal 0x00, core.apu.envelope_volume_for_test(0x02)
+end
+
+assert('GameBoy::APU CH2 retrigger restores initial envelope volume') do
+  core = GameBoy::Core.new(Array.new(0x8000, 0))
+
+  core.bus.write8(0xFF26, 0x00)
+  core.bus.write8(0xFF26, 0x80)
+  core.bus.write8(0xFF17, 0xA1)
+  core.bus.write8(0xFF19, 0x80)
+
+  core.run_steps(16_384)
+  assert_equal 0x09, core.apu.envelope_volume_for_test(0x02)
+
+  core.bus.write8(0xFF19, 0x80)
+
+  assert_equal 0x0A, core.apu.envelope_volume_for_test(0x02)
+  assert_equal 0x01, core.apu.envelope_timer_for_test(0x02)
+end
+
+assert('GameBoy::APU CH1 trigger latches sweep state') do
+  core = GameBoy::Core.new(Array.new(0x8000, 0))
+
+  core.bus.write8(0xFF26, 0x00)
+  core.bus.write8(0xFF26, 0x80)
+  core.bus.write8(0xFF12, 0x77)
+  core.bus.write8(0xFF10, 0x21)
+  core.bus.write8(0xFF13, 0x34)
+  core.bus.write8(0xFF14, 0x82)
+
+  assert_equal 0x01, core.bus.read8(0xFF26) & 0x01
+  assert_equal 0x02, core.apu.sweep_timer_for_test
+  assert_equal 0x0234, core.apu.sweep_shadow_frequency_for_test
+  assert_true core.apu.sweep_enabled_for_test
+end
+
+assert('GameBoy::APU CH1 sweep clocks on frame sequencer step 2') do
+  core = GameBoy::Core.new(Array.new(0x8000, 0))
+
+  core.bus.write8(0xFF26, 0x00)
+  core.bus.write8(0xFF26, 0x80)
+  core.bus.write8(0xFF12, 0x77)
+  core.bus.write8(0xFF10, 0x11)
+  core.bus.write8(0xFF13, 0x00)
+  core.bus.write8(0xFF14, 0x81)
+
+  core.run_steps(6_144)
+
+  assert_equal 0x0180, core.apu.sweep_shadow_frequency_for_test
+  assert_equal 0x0180, core.apu.ch1_frequency_for_test
+  assert_equal 0x01, core.apu.sweep_timer_for_test
+  assert_true core.apu.sweep_enabled_for_test
+end
+
+assert('GameBoy::APU CH1 sweep overflow disables channel') do
+  core = GameBoy::Core.new(Array.new(0x8000, 0))
+
+  core.bus.write8(0xFF26, 0x00)
+  core.bus.write8(0xFF26, 0x80)
+  core.bus.write8(0xFF12, 0x77)
+  core.bus.write8(0xFF10, 0x11)
+  core.bus.write8(0xFF13, 0x00)
+  core.bus.write8(0xFF14, 0x85)
+
+  assert_equal 0xF1, core.bus.read8(0xFF26)
+
+  core.run_steps(6_144)
+
+  assert_equal 0xF0, core.bus.read8(0xFF26)
+  assert_false core.apu.sweep_enabled_for_test
 end
 
 assert('GameBoy::Cartridge builds basic MBC1 cartridges') do

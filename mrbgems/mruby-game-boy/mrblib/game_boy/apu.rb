@@ -8,6 +8,11 @@ module GameBoy
       0xFF1E => 0x04,
       0xFF23 => 0x08
     }.freeze
+    ENVELOPE_REGISTERS = {
+      0xFF12 => 0x01,
+      0xFF17 => 0x02,
+      0xFF21 => 0x08
+    }.freeze
     READ_MASKS = {
       0xFF10 => 0x80,
       0xFF11 => 0x3F,
@@ -42,6 +47,8 @@ module GameBoy
       @wave_ram = Array.new(0x10, 0x00)
       @power_on = false
       @channel_status = 0x00
+      reset_envelopes
+      reset_sweep
       reset_sequencer
       clear_registers
     end
@@ -50,6 +57,8 @@ module GameBoy
       clear_registers
       @wave_ram = Array.new(0x10, 0x00)
       @channel_status = 0x00
+      reset_envelopes
+      reset_sweep
       reset_sequencer
 
       keys = values.keys
@@ -105,6 +114,8 @@ module GameBoy
       when 0xFF26
         write_nr52(value)
       when 0xFF30..0xFF3F
+        return value if ch3_active?
+
         @wave_ram[addr - 0xFF30] = value
       when 0xFF15, 0xFF1F, 0xFF27..0xFF2F
         return value
@@ -137,6 +148,8 @@ module GameBoy
       if (value & 0x80) == 0
         @power_on = false
         @channel_status = 0x00
+        reset_envelopes
+        reset_sweep
         reset_sequencer
         clear_registers
         return
@@ -144,6 +157,8 @@ module GameBoy
 
       unless @power_on
         clear_registers
+        reset_envelopes
+        reset_sweep
         reset_sequencer
       end
 
@@ -159,8 +174,35 @@ module GameBoy
       return unless dac_enabled_for_trigger?(addr)
 
       reload_length_on_trigger(addr)
+      trigger_envelope(addr)
+      return unless trigger_sweep(addr)
+
       @channel_status |= status_bit
       @registers[0xFF26] = 0x80 | (@channel_status & 0x0F)
+    end
+
+    def reset_envelopes
+      @envelope_volumes = {
+        0x01 => 0,
+        0x02 => 0,
+        0x08 => 0
+      }
+      @envelope_timers = {
+        0x01 => 0,
+        0x02 => 0,
+        0x08 => 0
+      }
+      @envelope_active = {
+        0x01 => false,
+        0x02 => false,
+        0x08 => false
+      }
+    end
+
+    def reset_sweep
+      @sweep_timer = 0
+      @sweep_shadow_frequency = 0
+      @sweep_enabled = false
     end
 
     def reset_sequencer
@@ -176,6 +218,8 @@ module GameBoy
 
     def advance_frame_sequencer
       clock_length_counters if (@frame_sequencer_step & 0x01) == 0
+      clock_sweep if @frame_sequencer_step == 2 || @frame_sequencer_step == 6
+      clock_envelopes if @frame_sequencer_step == 7
       @frame_sequencer_step = (@frame_sequencer_step + 1) & 0x07
     end
 
@@ -221,6 +265,144 @@ module GameBoy
     def disable_channel(addr)
       @channel_status &= (~STATUS_BITS[addr]) & 0x0F
       @registers[0xFF26] = 0x80 | (@channel_status & 0x0F)
+      @sweep_enabled = false if addr == 0xFF14
+    end
+
+    def trigger_envelope(addr)
+      envelope_addr = envelope_register_for_trigger(addr)
+      return unless envelope_addr
+
+      channel_bit = STATUS_BITS[addr]
+      @envelope_volumes[channel_bit] = (@registers[envelope_addr] >> 4) & 0x0F
+      @envelope_timers[channel_bit] = envelope_period(@registers[envelope_addr])
+      @envelope_active[channel_bit] = true
+    end
+
+    def trigger_sweep(addr)
+      return true unless addr == 0xFF14
+
+      @sweep_shadow_frequency = ch1_frequency
+      @sweep_timer = sweep_period(@registers[0xFF10])
+      @sweep_enabled = sweep_period_raw(@registers[0xFF10]) != 0 || sweep_shift(@registers[0xFF10]) != 0
+
+      if sweep_shift(@registers[0xFF10]) != 0 && sweep_overflow?(calculate_sweep_frequency(@sweep_shadow_frequency))
+        disable_channel(0xFF14)
+        return false
+      end
+
+      true
+    end
+
+    def clock_sweep
+      return unless @sweep_enabled
+
+      @sweep_timer -= 1 if @sweep_timer > 0
+      return unless @sweep_timer == 0
+
+      @sweep_timer = sweep_period(@registers[0xFF10])
+      shift = sweep_shift(@registers[0xFF10])
+      return if shift == 0
+
+      new_frequency = calculate_sweep_frequency(@sweep_shadow_frequency)
+      if sweep_overflow?(new_frequency)
+        disable_channel(0xFF14)
+        return
+      end
+
+      @sweep_shadow_frequency = new_frequency
+      set_ch1_frequency(new_frequency)
+
+      disable_channel(0xFF14) if sweep_overflow?(calculate_sweep_frequency(@sweep_shadow_frequency))
+    end
+
+    def clock_envelopes
+      ENVELOPE_REGISTERS.each do |addr, channel_bit|
+        next unless @envelope_active[channel_bit]
+        next if !channel_enabled?(channel_bit) || !dac_enabled?(addr)
+
+        @envelope_timers[channel_bit] -= 1 if @envelope_timers[channel_bit] > 0
+        next unless @envelope_timers[channel_bit] == 0
+
+        @envelope_timers[channel_bit] = envelope_period(@registers[addr])
+        step_envelope(channel_bit, @registers[addr])
+      end
+    end
+
+    def step_envelope(channel_bit, value)
+      direction_up = (value & 0x08) != 0
+      volume = @envelope_volumes[channel_bit]
+
+      if direction_up
+        if volume < 15
+          @envelope_volumes[channel_bit] = volume + 1
+        else
+          @envelope_active[channel_bit] = false
+        end
+      elsif volume > 0
+        @envelope_volumes[channel_bit] = volume - 1
+      else
+        @envelope_active[channel_bit] = false
+      end
+    end
+
+    def channel_enabled?(channel_bit)
+      (@channel_status & channel_bit) != 0
+    end
+
+    def envelope_register_for_trigger(addr)
+      case addr
+      when 0xFF14 then 0xFF12
+      when 0xFF19 then 0xFF17
+      when 0xFF23 then 0xFF21
+      end
+    end
+
+    def envelope_period(value)
+      period = value & 0x07
+      period == 0 ? 8 : period
+    end
+
+    def sweep_period_raw(value)
+      (value >> 4) & 0x07
+    end
+
+    def sweep_period(value)
+      period = sweep_period_raw(value)
+      period == 0 ? 8 : period
+    end
+
+    def sweep_shift(value)
+      value & 0x07
+    end
+
+    def sweep_negate?(value)
+      (value & 0x08) != 0
+    end
+
+    def ch1_frequency
+      ((@registers[0xFF14] & 0x07) << 8) | @registers[0xFF13]
+    end
+
+    def set_ch1_frequency(value)
+      @registers[0xFF13] = value & 0xFF
+      @registers[0xFF14] = (@registers[0xFF14] & 0xF8) | ((value >> 8) & 0x07)
+    end
+
+    def calculate_sweep_frequency(base_frequency)
+      delta = base_frequency >> sweep_shift(@registers[0xFF10])
+      if sweep_negate?(@registers[0xFF10])
+        base_frequency - delta
+      else
+        base_frequency + delta
+      end
+    end
+
+    def sweep_overflow?(frequency)
+      frequency < 0 || frequency > 0x07FF
+    end
+
+    def ch3_active?
+      (@channel_status & 0x04) != 0
     end
 
     def update_dac_status(addr)
